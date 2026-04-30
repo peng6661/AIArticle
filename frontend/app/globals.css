@@ -1,0 +1,67 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #ffffff;
+  --foreground: #111111;
+  --brand: #d94e28;
+  --brand-soft: #f8d7cd;
+}
+
+body {
+  background-color: #ffffff;
+  color: #111111;
+  -webkit-font-smoothing: antialiased;
+}
+
+@layer components {
+  .btn-brand {
+    @apply px-6 py-2.5 bg-[#D94E28] text-white font-bold rounded-full transition-all hover:bg-[#c44322] active:scale-[0.98] shadow-lg shadow-[#D94E28]/25;
+  }
+
+  .btn-brand-inner {
+    @apply px-6 py-3 bg-[#E85A3A] text-white font-bold rounded-full transition-all hover:bg-[#D94E28] active:scale-[0.98] shrink-0;
+  }
+
+  .btn-brand-outline {
+    @apply px-8 py-3 bg-transparent border-2 border-[#D94E28] text-[#D94E28] font-bold rounded-full transition-all hover:bg-[#D94E28]/5 active:scale-[0.98];
+  }
+
+  .pill-badge {
+    @apply px-4 py-2 bg-transparent border border-white/15 rounded-full text-[13px] font-bold text-white flex items-center justify-center gap-2;
+  }
+
+  .floating-input {
+    @apply w-full bg-transparent border border-white/15 rounded-[9999px] pl-5 pr-3 py-3 flex items-center gap-3 transition-all focus-within:border-white/30;
+  }
+
+  .hero-headline {
+    @apply text-5xl sm:text-6xl md:text-[3.5rem] lg:text-[4.25rem] font-extrabold tracking-tight text-white leading-[1.05];
+  }
+
+  .tab-editor-active {
+    @apply inline-flex items-center gap-2 rounded-full bg-[#D94E28] px-5 py-2.5 text-sm font-bold text-white shadow-md shadow-[#D94E28]/30;
+  }
+
+  .app-window-chrome {
+    @apply rounded-2xl border border-white/10 bg-transparent shadow-none;
+  }
+}
+
+.text-brand {
+  color: #d94e28;
+}
+
+.bg-brand {
+  background-color: #d94e28;
+}
+
+/* 隐藏滚动条但保留滚动功能（用于缩略图横向滚动） */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}

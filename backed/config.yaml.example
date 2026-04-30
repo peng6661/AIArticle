@@ -1,0 +1,88 @@
+# =============================================
+# AIcreator 配置文件
+# 复制此文件为 config.yaml 并填入真实值
+# =============================================
+
+# 路径配置
+paths:
+  downloads_dir: "downloads"        # 视频/音频/文字下载目录
+  outputs_dir: "outputs"            # 生成图片/文章输出目录
+
+# 抖音下载配置
+douyin:
+  user_agent: "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1"
+  referer: "https://www.douyin.com/"
+  timeout_short: 5
+  timeout_medium: 10
+  timeout_download: 30
+
+# 音频提取配置
+audio:
+  default_format: "mp3"             # 支持 mp3 / wav
+  ffmpeg_mp3_quality: "2"           # 0最好 9最差，2为高质量
+
+# 语音转写配置
+transcribe:
+  default_model: "small"            # tiny / base / small / medium / large-v3
+  default_language: "zh"
+  device: "auto"                    # auto / cpu / cuda
+  compute_type: "auto"              # auto = GPU 时 float16，CPU 时 int8
+  vad_filter: true
+
+# SiliconFlow AI 配置
+siliconflow:
+  base_url: "https://api.siliconflow.cn/v1"
+  default_text_model: "Qwen/Qwen3-14B"
+  default_image_model: "Qwen/Qwen-Image"
+  default_temperature: 0.7
+  default_image_size: "1664x928"
+  max_tokens: 4096
+
+# 文章生成配置
+article:
+  default_topic: "AI"
+  default_extra_requirements: ""
+
+# 微信公众号配置
+wechat:
+  appid: "YOUR_APPID"               # 从环境变量 WECHAT_APPID 读取
+  appsecret: "YOUR_APPSECRET"       # 从环境变量 WECHAT_APPSECRET 读取
+  default_author: ""
+  default_digest: ""
+  default_content_source_url: ""
+  need_open_comment: 0
+  only_fans_can_comment: 0
+  default_original_notice: ""
+  mp_draft_list_url: "https://mp.weixin.qq.com/"
+  api_base: "https://api.weixin.qq.com"
+
+# 服务器配置
+server:
+  host: "0.0.0.0"
+  port: 8000
+  debug: true
+  title: "AI文章自动化"
+  description: "抖音视频 → 文章 → 微信公众号 一站式自动化流水线"
+  version: "1.0.0"
+
+# 数据库配置
+database:
+  url: "mysql+pymysql://<用户名>:<密码>@<主机>:<端口>/<数据库名>?charset=utf8mb4"
+  mysql:
+    host: "127.0.0.1"
+    port: 3306
+    user: "root"
+    password: "YOUR_DB_PASSWORD"     # 也可通过环境变量 MYSQL_PASSWORD 覆盖
+    database: "aicreator"
+    charset: "utf8mb4"
+    collation: "utf8mb4_unicode_ci"
+  echo: false
+  pool_pre_ping: true
+  pool_recycle: 3600
+  pool_size: 10
+  max_overflow: 20
+  pool_timeout: 30
+  connect_args:
+    connect_timeout: 10
+    read_timeout: 30
+    write_timeout: 30

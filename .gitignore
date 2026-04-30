@@ -1,0 +1,63 @@
+# IDE
+.idea/
+.vscode/
+
+# WorkBuddy
+.workbuddy/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
+*.so
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Node.js
+node_modules/
+.next/
+out/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Sensitive config (contains API keys & DB passwords)
+backed/config.yaml
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Test / coverage
+htmlcov/
+.coverage
+.coverage.*
+coverage/
+.mypy_cache/
+.pytest_cache/
+
+# Downloaded media (large files)
+downloads/
+output/
+temp/
+tmp/
