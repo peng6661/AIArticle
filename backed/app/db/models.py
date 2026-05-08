@@ -137,9 +137,13 @@ class PipelineJobModel(Base):
         String(255), nullable=True,
         comment="AI 生成的文章标题",
     )
+    article_body_markdown: Mapped[str | None] = mapped_column(
+        Text, nullable=True,
+        comment="AI 生成的正文 Markdown（含图片占位符）",
+    )
     article_body_html: Mapped[str | None] = mapped_column(
         Text, nullable=True,
-        comment="AI 生成的正文 HTML（含图片占位符）",
+        comment="AI 生成的正文 HTML（含图片占位符，由 Markdown 转换而来）",
     )
     article_image_prompts: Mapped[list | None] = mapped_column(
         JSON, nullable=True,
@@ -148,6 +152,10 @@ class PipelineJobModel(Base):
     generate_inline_images: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True,
         comment="是否生成文中插图（False=仅封面）",
+    )
+    skip_publish: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False,
+        comment="是否跳过发布草稿步骤（True=仅生成文章和HTML）",
     )
     text_model: Mapped[str | None] = mapped_column(
         String(64), nullable=True,
@@ -430,3 +438,144 @@ class WechatImageAssetModel(Base):
             f"<WechatImageAsset job_id={self.job_id!r} "
             f"img_id={self.img_id!r} cover={self.is_cover}>"
         )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# RAG 知识库集合表
+# ══════════════════════════════════════════════════════════════════════════════
+
+class KnowledgeCollectionModel(Base):
+    """
+    知识库集合表。
+    一个集合对应一个主题知识库（如"AI技术"、"自媒体运营"），
+    包含多个文档，文档经分块向量化后存储在 ChromaDB 中。
+    """
+    __tablename__ = "knowledge_collections"
+
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True,
+        comment="自增主键",
+    )
+    name: Mapped[str] = mapped_column(
+        String(128), unique=True, nullable=False,
+        comment="集合名称（唯一标识）",
+    )
+    description: Mapped[str | None] = mapped_column(
+        Text, nullable=True,
+        comment="集合描述",
+    )
+    document_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0,
+        comment="集合中的文档数量",
+    )
+    chunk_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0,
+        comment="集合中的总分块数量",
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=_now_utc,
+        server_default=func.now(),
+        comment="创建时间（UTC）",
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=_now_utc,
+        onupdate=_now_utc,
+        server_default=func.now(),
+        comment="最后更新时间（UTC）",
+    )
+
+    documents: Mapped[list["KnowledgeDocumentModel"]] = relationship(
+        "KnowledgeDocumentModel",
+        back_populates="collection",
+        cascade="all, delete-orphan",
+        order_by="KnowledgeDocumentModel.id",
+        lazy="select",
+    )
+
+    __table_args__ = (
+        Index("ix_knowledge_collections_name", "name"),
+        {"mysql_engine": "InnoDB", "mysql_charset": "utf8mb4", "mysql_collate": "utf8mb4_unicode_ci"},
+    )
+
+    def __repr__(self) -> str:
+        return f"<KnowledgeCollection name={self.name!r} docs={self.document_count}>"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# RAG 知识库文档表
+# ══════════════════════════════════════════════════════════════════════════════
+
+class KnowledgeDocumentModel(Base):
+    """
+    知识库文档表。
+    每条记录代表一篇导入知识库的文档（文本、PDF、Markdown 或历史文章）。
+    文档经解析、分块、向量化后存入 ChromaDB，本表记录元数据和状态。
+    """
+    __tablename__ = "knowledge_documents"
+
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True,
+        comment="自增主键",
+    )
+    collection_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("knowledge_collections.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+        comment="关联的集合 ID",
+    )
+    title: Mapped[str] = mapped_column(
+        String(255), nullable=False,
+        comment="文档标题",
+    )
+    source_type: Mapped[str] = mapped_column(
+        String(32), nullable=False,
+        comment="来源类型：text / markdown / pdf / history_article",
+    )
+    file_path: Mapped[str | None] = mapped_column(
+        String(512), nullable=True,
+        comment="原始文件路径（PDF 等上传文件）",
+    )
+    chunk_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0,
+        comment="文档分块数量",
+    )
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="processing",
+        comment="状态：processing / ready / failed",
+    )
+    error: Mapped[str | None] = mapped_column(
+        Text, nullable=True,
+        comment="处理失败时的错误信息",
+    )
+    source_job_id: Mapped[str | None] = mapped_column(
+        String(36), nullable=True,
+        comment="来源 pipeline 任务 ID（history_article 类型时使用）",
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=_now_utc,
+        server_default=func.now(),
+        comment="创建时间（UTC）",
+    )
+
+    collection: Mapped["KnowledgeCollectionModel"] = relationship(
+        "KnowledgeCollectionModel",
+        back_populates="documents",
+    )
+
+    __table_args__ = (
+        Index("ix_knowledge_documents_collection", "collection_id"),
+        Index("ix_knowledge_documents_status", "status"),
+        {"mysql_engine": "InnoDB", "mysql_charset": "utf8mb4", "mysql_collate": "utf8mb4_unicode_ci"},
+    )
+
+    def __repr__(self) -> str:
+        return f"<KnowledgeDocument title={self.title!r} status={self.status!r}>"

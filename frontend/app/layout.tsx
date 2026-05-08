@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Plus_Jakarta_Sans } from "next/font/google";
+import HotSearchShelf from "@/components/hot-search-shelf";
 import "./globals.css";
 
 const sans = Plus_Jakarta_Sans({
@@ -22,6 +23,7 @@ export default function RootLayout({
     <html lang="zh" className={sans.variable}>
       <body className={`${sans.className} font-sans antialiased`}>
         {children}
+        <HotSearchShelf />
       </body>
     </html>
   );

@@ -282,6 +282,16 @@ def ensure_database_schema() -> None:
         alter_statements.append(
             "ALTER TABLE pipeline_jobs ADD COLUMN image_urls JSON NULL"
         )
+    if "article_body_markdown" not in existing_columns:
+        alter_statements.append(
+            "ALTER TABLE pipeline_jobs ADD COLUMN article_body_markdown TEXT NULL"
+            " COMMENT 'AI 生成的正文 Markdown（含图片占位符）'"
+        )
+    if "skip_publish" not in existing_columns:
+        alter_statements.append(
+            "ALTER TABLE pipeline_jobs ADD COLUMN skip_publish BOOLEAN NOT NULL DEFAULT 0"
+            " COMMENT '是否跳过发布草稿步骤（True=仅生成文章和HTML）'"
+        )
 
     if not alter_statements:
         return

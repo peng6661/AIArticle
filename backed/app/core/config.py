@@ -126,6 +126,160 @@ class Settings:
     def siliconflow_max_tokens(self) -> int:
         return int(self.get("siliconflow", "max_tokens", default=4096))
 
+    # ── 智谱 AI ───────────────────────────────────────
+    @property
+    def zhipu_base_url(self) -> str:
+        return self.get("zhipu", "base_url", default="https://open.bigmodel.cn/api/paas/v4")
+
+    @property
+    def zhipu_default_text_model(self) -> str:
+        return self.get("zhipu", "default_text_model", default="glm-4-flash")
+
+    @property
+    def zhipu_default_image_model(self) -> str:
+        return self.get("zhipu", "default_image_model", default="cogview-3")
+
+    @property
+    def zhipu_default_temperature(self) -> float:
+        return float(self.get("zhipu", "default_temperature", default=0.7))
+
+    @property
+    def zhipu_default_image_size(self) -> str:
+        return self.get("zhipu", "default_image_size", default="1024x1024")
+
+    @property
+    def zhipu_max_tokens(self) -> int:
+        return int(self.get("zhipu", "max_tokens", default=4096))
+
+    # ── Embedding Provider 路由 ──────────────────────────
+    EMBEDDING_PROVIDER_URLS: dict[str, str] = {
+        "siliconflow": "https://api.siliconflow.cn/v1",
+        "zhipu": "https://open.bigmodel.cn/api/paas/v4",
+    }
+    EMBEDDING_PROVIDER_DEFAULT_MODELS: dict[str, str] = {
+        "siliconflow": "Qwen/Qwen3-Embedding-8B",
+        "zhipu": "embedding-3",
+    }
+
+    def get_embedding_base_url(self, provider: str | None = None) -> str:
+        """根据服务商名返回 embedding API 端点。provider 为空时使用 config 默认值。"""
+        if provider and provider in self.EMBEDDING_PROVIDER_URLS:
+            return self.EMBEDDING_PROVIDER_URLS[provider]
+        return self.rag_embedding_base_url
+
+    def get_embedding_default_model(self, provider: str | None = None) -> str:
+        """根据服务商名返回默认 embedding 模型。provider 为空时使用 config 默认值。"""
+        if provider and provider in self.EMBEDDING_PROVIDER_DEFAULT_MODELS:
+            return self.EMBEDDING_PROVIDER_DEFAULT_MODELS[provider]
+        return self.rag_embedding_model
+
+    # ── AI Provider 路由 ──────────────────────────────
+    def get_ai_provider_config(self, provider: str) -> dict:
+        """
+        根据 ai_provider 返回对应的 base_url、模型、参数。
+        provider: \"siliconflow\" | \"zhipu\"
+        """
+        if provider == "zhipu":
+            return {
+                "base_url": self.zhipu_base_url,
+                "default_text_model": self.zhipu_default_text_model,
+                "default_image_model": self.zhipu_default_image_model,
+                "default_temperature": self.zhipu_default_temperature,
+                "default_image_size": self.zhipu_default_image_size,
+                "max_tokens": self.zhipu_max_tokens,
+            }
+        return {
+            "base_url": self.siliconflow_base_url,
+            "default_text_model": self.siliconflow_default_text_model,
+            "default_image_model": self.siliconflow_default_image_model,
+            "default_temperature": self.siliconflow_default_temperature,
+            "default_image_size": self.siliconflow_default_image_size,
+            "max_tokens": self.siliconflow_max_tokens,
+        }
+
+    # ── RAG 知识库 ─────────────────────────────────────
+    @property
+    def rag_enabled(self) -> bool:
+        return bool(self.get("rag", "enabled", default=True))
+
+    @property
+    def rag_chroma_persist_dir(self) -> str:
+        return self.get("rag", "chroma_persist_dir", default="data/chroma_db")
+
+    @property
+    def rag_collection_prefix(self) -> str:
+        return self.get("rag", "collection_prefix", default="kb_")
+
+    @property
+    def rag_embedding_model(self) -> str:
+        return self.get("rag", "embedding_model", default="embedding-3")
+
+    @property
+    def rag_embedding_base_url(self) -> str:
+        """向量模型 API 端点，可独立于 LLM 服务商配置。"""
+        return self.get("rag", "embedding_base_url", default="https://open.bigmodel.cn/api/paas/v4")
+
+    @property
+    def rag_embedding_api_key(self) -> str:
+        """向量模型专用 API Key。留空则使用前端传入的 api_key。"""
+        return os.getenv("RAG_EMBEDDING_API_KEY") or self.get("rag", "embedding_api_key", default="")
+
+    @property
+    def rag_chunk_size(self) -> int:
+        return int(self.get("rag", "chunk_size", default=500))
+
+    @property
+    def rag_chunk_overlap(self) -> int:
+        return int(self.get("rag", "chunk_overlap", default=100))
+
+    @property
+    def rag_top_k(self) -> int:
+        return int(self.get("rag", "top_k", default=5))
+
+    @property
+    def rag_similarity_threshold(self) -> float:
+        return float(self.get("rag", "similarity_threshold", default=0.3))
+
+    # ── YouTube ──────────────────────────────────────
+    @property
+    def youtube_cookies_source(self) -> str:
+        """cookies 来源：browser = 从本地浏览器读取，file = 从文件读取，none = 不使用"""
+        return self.get("youtube", "cookies_source", default="file")
+
+    @property
+    def youtube_browser(self) -> str:
+        """浏览器类型（chrome/firefox/edge/opera/vivaldi/brave/chromium）"""
+        return self.get("youtube", "browser", default="chrome")
+
+    @property
+    def youtube_cookies_file(self) -> str:
+        """cookies 文件路径（Netscape 格式，相对于 backed/ 目录）"""
+        return self.get("youtube", "cookies_file", default="cookies_youtube.txt")
+
+    @property
+    def youtube_js_runtime(self) -> str:
+        """
+        yt-dlp JS 运行时路径，用于生成 PO Token（新版 yt-dlp 必须）。
+        支持：node/nodejs/deno/bun/quickjs
+        设置为 auto 时自动在 PATH 中查找 node/deno/bun
+        留空则不配置（部分视频会缺失格式）
+        """
+        return self.get("youtube", "js_runtime", default="auto")
+
+    @property
+    def youtube_remote_components(self) -> str:
+        """
+        yt-dlp 远程组件配置，用于 JS 挑战求解和 PO Token 生成。
+        参考：https://github.com/yt-dlp/yt-dlp/wiki/EJS
+        可选值：
+          "github"  — 从 GitHub 下载挑战脚本（推荐）
+          "npm"     — 从 npm 下载
+          "github,npm" — 多个源
+          "none"    — 不启用（旧版 yt-dlp 可用）
+        留空默认 "github"
+        """
+        return self.get("youtube", "remote_components", default="github")
+
     # ── 文章 ─────────────────────────────────────────
     @property
     def article_default_topic(self) -> str:

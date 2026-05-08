@@ -37,6 +37,13 @@ export const STEP_ORDER: string[] = [
   StepName.PUBLISH_DRAFT,
 ];
 
+export function getVisibleStepOrder(job: Pick<JobStatusResponse, "skip_publish">): string[] {
+  if (job.skip_publish) {
+    return STEP_ORDER.filter((step) => step !== StepName.PUBLISH_DRAFT);
+  }
+  return STEP_ORDER;
+}
+
 export interface StepResult {
   step: string;
   status: string;
@@ -51,10 +58,12 @@ export interface JobStatusResponse {
   status: JobStatus;
   current_step: string | null;
   steps: StepResult[];
+  skip_publish: boolean;
   share_text: string | null;
   video_path: string | null;
   audio_path: string | null;
   transcript_path: string | null;
+  article_body_markdown: string | null;  // 生成的 Markdown 文章
   article_html: string | null;
   wechat_html_path: string | null;
   image_path: string | null;
@@ -80,6 +89,7 @@ export interface FullPipelineRequest {
   siliconflow_api_key: string;
   wechat_appid?: string;
   wechat_appsecret?: string;
+  ai_provider?: "siliconflow" | "zhipu";
   topic?: string;
   extra_requirements?: string;
   text_model?: string;
@@ -93,6 +103,10 @@ export interface FullPipelineRequest {
   original_notice?: string;
   generate_inline_images?: boolean;
   skip_publish?: boolean;
+  rag_collection?: string;
+  rag_top_k?: number;
+  rag_embedding_model?: string;
+  rag_embedding_provider?: string;
 }
 
 export interface FullPipelineResponse {
@@ -104,9 +118,35 @@ export interface FullPipelineResponse {
 export function calculateProgress(job: JobStatusResponse): number {
   if (job.status === JobStatus.SUCCESS) return 100;
   if (job.status === JobStatus.PENDING) return 0;
-  // PAUSED / RUNNING / FAILED 都按已完成步骤计算
-  const completed = job.steps.filter(
-    (s) => s.status === JobStatus.SUCCESS
-  ).length;
-  return Math.round((completed / STEP_ORDER.length) * 100);
+  if (job.status === JobStatus.CANCELLED) return 0;
+
+  const totalSteps = getVisibleStepOrder(job).length;
+
+  // 统计各状态步骤（兼容 steps 为空但 current_step 已设置的竞态场景）
+  let completed = 0;
+  let running = 0;
+  for (const s of job.steps) {
+    if (s.status === JobStatus.SUCCESS) {
+      completed += 1;
+    } else if (s.status === JobStatus.RUNNING) {
+      running += 1;
+    } else if (s.status === JobStatus.FAILED) {
+      // 失败步骤也算已推进（后续可重试）
+      completed += 1;
+    }
+  }
+
+  // 已完成步骤全算 + 正在运行的步骤给 50% 权重
+  let progress = Math.round(((completed + running * 0.5) / totalSteps) * 100);
+
+  // RUNNING 状态保底 ≥5%，避免任务已启动但步骤尚未写入 DB 时进度条卡在 0%
+  if (job.status === JobStatus.RUNNING && progress < 5) {
+    progress = 5;
+  }
+  // PAUSED 状态保底：至少显示已完成的进度
+  if (job.status === JobStatus.PAUSED && progress < 5 && completed > 0) {
+    progress = 5;
+  }
+
+  return Math.min(progress, 100);
 }

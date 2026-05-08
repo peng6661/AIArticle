@@ -39,6 +39,7 @@ async def run_full_pipeline(req: FullPipelineRequest, background_tasks: Backgrou
     """
     job = pipeline_store.create()
     job.share_text = req.share_text
+    job.skip_publish = req.skip_publish
     pipeline_store.save(job)
     background_tasks.add_task(_run_full_pipeline_bg, job.job_id, req)
     return FullPipelineResponse(
@@ -76,7 +77,7 @@ def _run_full_pipeline_bg(job_id: str, req: FullPipelineRequest):
     from app.services.transcribe_service import transcribe_audio
     from app.services.article_service import generate_article
     from app.services.image_service import generate_images_concurrent, upload_images_to_wechat_concurrent
-    from app.services.html_service import sanitize_wechat_html
+    from app.services.html_service import convert_to_wechat_html
     from app.services.wechat_service import (
         get_access_token, replace_image_placeholders, publish_draft
     )
@@ -284,17 +285,37 @@ def _run_full_pipeline_bg(job_id: str, req: FullPipelineRequest):
             return
         raise
     try:
+        ai_cfg = cfg.get_ai_provider_config(req.ai_provider)
+        # ── 打印配置信息，方便调试 ──────────────────────────────────────
+        masked_key = (req.siliconflow_api_key[:6] + "****" + req.siliconflow_api_key[-4:]) if req.siliconflow_api_key and len(req.siliconflow_api_key) > 10 else "（空）"
+        _text_model = req.text_model or ai_cfg["default_text_model"]
+        print(f"\n{'='*60}")
+        print(f"[Step4-文章] 配置信息 | job_id={job_id} | ai_provider={req.ai_provider}")
+        print(f"  base_url  = {ai_cfg['base_url']}")
+        print(f"  api_key   = {masked_key}")
+        print(f"  model     = {_text_model}")
+        print(f"  temp      = {ai_cfg['default_temperature']}")
+        print(f"  max_tokens= {ai_cfg['max_tokens']}")
+        print(f"{'='*60}\n")
         article_data = generate_article(
             material_path=Path(job.transcript_path),
             topic=req.topic or None,
             extra_requirements=req.extra_requirements,
             api_key=req.siliconflow_api_key,
-            model_name=req.text_model or None,
+            model_name=_text_model,
+            temperature=ai_cfg["default_temperature"],
             generate_inline_images=req.generate_inline_images,
+            base_url=ai_cfg["base_url"],
+            max_tokens=ai_cfg["max_tokens"],
+            rag_collection=req.rag_collection or None,
+            rag_top_k=req.rag_top_k,
+            rag_embedding_model=req.rag_embedding_model or None,
+            rag_embedding_provider=req.rag_embedding_provider or None,
         )
-        # article_data = {"title": "...", "content": "...", "image_prompts": [...]}
+        # article_data = {"title": "...", "content": "Markdown格式正文(含图片占位符)", "image_prompts": [...]}
         job.article_title = article_data["title"]
-        job.article_body_html = article_data["content"]
+        job.article_body_markdown = article_data["content"]   # content 是 Markdown，存到此字段
+        job.article_body_html = article_data["content"]      # 同时写入 HTML 字段（Step6 会清洗转换）
         job.article_image_prompts = article_data["image_prompts"]
         job.generate_inline_images = req.generate_inline_images
         _finish_step(job, result, data={
@@ -334,13 +355,25 @@ def _run_full_pipeline_bg(job_id: str, req: FullPipelineRequest):
         if not prompts_to_generate:
             raise ValueError("没有可生成的图片 prompt，请检查 Step4 输出")
 
+        # ── 打印配置信息，方便调试 ──────────────────────────────────────
+        _image_model = req.image_model or ai_cfg["default_image_model"]
+        _image_size = req.image_size or ai_cfg["default_image_size"]
+        print(f"\n{'='*60}")
+        print(f"[Step5-配图] 配置信息 | job_id={job_id} | ai_provider={req.ai_provider}")
+        print(f"  base_url  = {ai_cfg['base_url']}")
+        print(f"  api_key   = {masked_key}")
+        print(f"  model     = {_image_model}")
+        print(f"  size      = {_image_size}")
+        print(f"{'='*60}\n")
+
         # 5b. 并发生图，下载到本地
         local_map = generate_images_concurrent(
             image_prompts=prompts_to_generate,
             api_key=req.siliconflow_api_key,
             output_dir=cfg.outputs_dir,
-            model_name=req.image_model or None,
-            image_size=req.image_size or None,
+            model_name=_image_model,
+            image_size=_image_size,
+            base_url=ai_cfg["base_url"],
         )
 
         # 5c. 封面图：优先 id=cover，兜底取第一张
@@ -399,8 +432,8 @@ def _run_full_pipeline_bg(job_id: str, req: FullPipelineRequest):
             html = replace_image_placeholders(html, job.wechat_image_map)
         # generate_inline_images=False 时，article_body_html 已无占位符（Step4 已清除），直接清洗
 
-        # 微信白名单清洗
-        wechat_html = sanitize_wechat_html(html)
+        # Markdown → 微信兼容 HTML（先转 Markdown 再清洗）
+        wechat_html = convert_to_wechat_html(html, is_markdown=True)
 
         output_path = (cfg.outputs_dir / f"{job_id}_wechat.html").resolve()
         output_path.parent.mkdir(parents=True, exist_ok=True)

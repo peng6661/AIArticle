@@ -228,7 +228,7 @@ def publish_draft(
         original_notice = cfg.wechat_default_original_notice
 
     # ── 注入原创声明 ──────────────────────────────────────────────────────────
-    final_html = inject_original_notice(content_html, original_notice, put_at_top=True)
+    final_html = inject_original_notice(content_html, original_notice, put_at_top=False)
 
     # ── 标题兜底 ──────────────────────────────────────────────────────────────
     if not title:

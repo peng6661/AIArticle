@@ -16,6 +16,9 @@ from app.core.config import get_settings
 from app.api.pipeline_router import router as step_router
 from app.api.full_pipeline_router import router as full_router
 from app.api.video_router import router as video_router
+from app.api.hot_router import router as hot_router
+from app.api.knowledge_router import router as knowledge_router
+from app.api.search_router import router as search_router
 from app.db.database import ensure_database_schema
 
 
@@ -56,6 +59,9 @@ def create_app() -> FastAPI:
     app.include_router(full_router)
     # video_router 自身已定义 prefix="/api/video"，此处不再重复添加
     app.include_router(video_router)
+    app.include_router(search_router)
+    app.include_router(hot_router)
+    app.include_router(knowledge_router)
 
     @app.get("/", tags=["Root"])
     def root():
@@ -81,6 +87,22 @@ def create_app() -> FastAPI:
                 "GET    /api/video/download      → 流式下载视频/图片",
                 "GET    /api/video/preview       → 图片预览代理",
                 "GET    /api/video/platforms     → 支持平台列表",
+                "POST   /api/video/search        → 多平台视频搜索",
+                "GET    /api/video/search/platforms → 搜索支持的平台",
+            ],
+            "hot_api": [
+                "GET    /api/hot/boards         → 获取热搜榜单聚合",
+            ],
+            "knowledge_api": [
+                "POST   /api/knowledge/collections       → 创建知识库集合",
+                "GET    /api/knowledge/collections       → 列出所有集合",
+                "DELETE /api/knowledge/collections/{id}  → 删除集合",
+                "POST   /api/knowledge/documents/text    → 上传文本/Markdown 文档",
+                "POST   /api/knowledge/documents/pdf     → 上传 PDF 文件",
+                "POST   /api/knowledge/documents/from-job → 从 pipeline 任务导入",
+                "GET    /api/knowledge/documents         → 列出文档",
+                "DELETE /api/knowledge/documents/{id}    → 删除文档",
+                "POST   /api/knowledge/search            → 测试检索",
             ],
         }
 

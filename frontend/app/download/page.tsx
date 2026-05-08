@@ -1,7 +1,9 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
+import { Search, TrendingUp, Play, Heart, MessageCircle, Download } from "lucide-react";
 import Navbar from "@/components/navbar";
+import { taskApi, VideoSearchResult } from "@/lib/tasks-api";
 
 // ─── 后端 API 基础地址 ──────────────────────────────────────
 const API_BASE = "/api/video";
@@ -106,6 +108,79 @@ export default function DownloadPage() {
   const batchCancelRef = useRef<boolean>(false);
   // YouTube 下载：当前 download_id（用于取消）
   const ytDownloadIdRef = useRef<string>("");
+
+  // ── 多平台热点搜索状态 ──
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchError, setSearchError] = useState("");
+  const [searchResults, setSearchResults] = useState<Record<string, VideoSearchResult[]>>({});
+  const [searchErrors, setSearchErrors] = useState<string[]>([]);
+  const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>([
+    "bilibili", "youtube",
+  ]);
+  const [activeSearchPlatform, setActiveSearchPlatform] = useState("all");
+  const [searchLimit, setSearchLimit] = useState(10);
+
+  // 判断输入是 URL 还是关键词
+  const isUrl = (text: string) => {
+    const trimmed = text.trim();
+    return /^https?:\/\//i.test(trimmed) || /^www\./i.test(trimmed) || /(?:douyin|bilibili|b23|tiktok|kuaishou|instagram|x\.com|twitter\.com|youtube\.com|youtu\.be)\./i.test(trimmed);
+  };
+
+  const PLATFORM_MAP: Record<string, { name: string; color: string; icon: string }> = {
+    bilibili:  { name: "B站",      color: "#ec4899", icon: "📺" },
+    youtube:   { name: "YouTube",  color: "#ef4444", icon: "▶️" },
+    kuaishou:  { name: "快手",     color: "#ff6600", icon: "📱" },
+    instagram: { name: "Instagram", color: "#e1306c", icon: "📷" },
+  };
+
+  const togglePlatform = (pid: string) => {
+    setSelectedPlatforms((prev) =>
+      prev.includes(pid) ? prev.filter((p) => p !== pid) : [...prev, pid]
+    );
+  };
+
+  const handleSearch = async () => {
+    if (!url.trim() || searchLoading) return;
+    // 清除下载相关状态
+    setResult(null);
+    setErrorMsg("");
+    setSearchLoading(true);
+    setSearchError("");
+    setSearchResults({});
+    setSearchErrors([]);
+    try {
+      const res = await taskApi.searchVideos(url.trim(), selectedPlatforms, searchLimit);
+      if (res.success) {
+        setSearchResults(res.results);
+        setSearchErrors(res.errors);
+      } else {
+        setSearchError("搜索失败");
+      }
+    } catch (err: any) {
+      setSearchError(err.message || "搜索请求失败");
+    } finally {
+      setSearchLoading(false);
+    }
+  };
+
+  // 按热度分排序合并所有结果
+  const allSortedResults = Object.entries(searchResults)
+    .flatMap(([pid, vids]) => vids.map((v) => ({ ...v, _platform: pid })))
+    .sort((a, b) => b.heat_score - a.heat_score);
+
+  const formatCount = (n: number) => {
+    if (n >= 100000000) return `${(n / 100000000).toFixed(1)}亿`;
+    if (n >= 10000) return `${(n / 10000).toFixed(1)}万`;
+    if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+    return String(n);
+  };
+
+  const formatDuration = (sec: number) => {
+    if (!sec) return "";
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    return `${m}:${String(s).padStart(2, "0")}`;
+  };
 
   // 重置状态
   const resetState = () => {
@@ -599,28 +674,86 @@ export default function DownloadPage() {
         <div className="relative z-10 flex w-full max-w-3xl flex-col items-center text-center">
 
           {/* 标题 */}
-          <h1 className="hero-headline mb-12">短视频下载平台</h1>
+          <h1 className="hero-headline mb-10">短视频下载平台</h1>
 
-          {/* 输入框 + 解析按钮 */}
+          {/* ── 统一输入区 ─────────────────────────── */}
           <div className="w-full max-w-2xl space-y-3">
+            {/* 主输入框 */}
             <div className="floating-input">
               <input
                 id="download-url"
                 type="text"
-                placeholder="粘贴抖音 / Instagram / B站 / TikTok 等分享链接…"
+                placeholder="粘贴链接下载 / 输入关键词搜索热门视频…"
                 value={url}
-                onChange={(e) => { setUrl(e.target.value); if (errorMsg && e.target.value.trim()) setErrorMsg(""); }}
-                onKeyDown={(e) => e.key === "Enter" && handleParse()}
+                onChange={(e) => { setUrl(e.target.value); if (errorMsg && e.target.value.trim()) setErrorMsg(""); setSearchError(""); }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    isUrl(url) ? handleParse() : handleSearch();
+                  }
+                }}
                 className="min-w-0 flex-1 border-none bg-transparent text-base font-medium text-white placeholder:text-white/40 focus:outline-none focus:ring-0 pl-5 pr-3 py-3"
               />
-              <button
-                type="button"
-                onClick={handleParse}
-                disabled={loading || !url}
-                className="btn-brand-inner disabled:pointer-events-none disabled:opacity-50 shrink-0"
-              >
-                {loading ? "解析中…" : "解析"}
-              </button>
+              {/* 动态按钮：根据输入内容切换 */}
+              {isUrl(url) ? (
+                <button
+                  type="button"
+                  onClick={handleParse}
+                  disabled={loading || !url.trim()}
+                  className="btn-brand-inner disabled:pointer-events-none disabled:opacity-50 shrink-0 flex items-center gap-1.5"
+                >
+                  <Download className="h-4 w-4" />
+                  {loading ? "解析中…" : "解析"}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleSearch}
+                  disabled={searchLoading || !url.trim() || selectedPlatforms.length === 0}
+                  className="btn-brand-inner disabled:pointer-events-none disabled:opacity-50 shrink-0 flex items-center gap-1.5"
+                >
+                  {searchLoading ? (
+                    <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+                  ) : (
+                    <Search className="h-4 w-4" />
+                  )}
+                  {searchLoading ? "搜索中…" : "搜索"}
+                </button>
+              )}
+            </div>
+
+            {/* 平台选择 + 数量设置 */}
+            <div className="flex flex-wrap items-center gap-2 px-1">
+              <span className="text-[11px] text-white/30 mr-1">搜索平台:</span>
+              {Object.entries(PLATFORM_MAP).map(([pid, info]) => (
+                <button
+                  key={pid}
+                  type="button"
+                  onClick={() => togglePlatform(pid)}
+                  className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-1 text-[11px] font-medium transition-all ${
+                    selectedPlatforms.includes(pid)
+                      ? "border-[#D94E28]/40 bg-[#D94E28]/15 text-[#FF8A65]"
+                      : "border-white/10 bg-white/5 text-white/35 hover:bg-white/10 hover:text-white/50"
+                  }`}
+                >
+                  <span>{info.icon}</span>
+                  <span>{info.name}</span>
+                </button>
+              ))}
+              <span className="ml-2 text-[11px] text-white/30">每平台:</span>
+              {[5, 10, 15, 20].map((n) => (
+                <button
+                  key={n}
+                  type="button"
+                  onClick={() => setSearchLimit(n)}
+                  className={`rounded-lg border px-2 py-1 text-[11px] font-medium transition-all ${
+                    searchLimit === n
+                      ? "border-[#D94E28]/40 bg-[#D94E28]/15 text-[#FF8A65]"
+                      : "border-white/10 bg-white/5 text-white/35 hover:bg-white/10"
+                  }`}
+                >
+                  {n}
+                </button>
+              ))}
             </div>
 
             {/* 错误提示 */}
@@ -629,7 +762,172 @@ export default function DownloadPage() {
                 {errorMsg}
               </div>
             )}
+            {searchError && (
+              <div className="rounded-xl border border-red-400/30 bg-red-500/20 backdrop-blur-md px-4 py-3 text-left text-sm text-red-200">
+                {searchError}
+              </div>
+            )}
+            {searchErrors.length > 0 && (
+              <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 backdrop-blur-md px-4 py-3 text-xs text-amber-300/80">
+                {searchErrors.length} 个平台搜索失败: {searchErrors.join("; ")}
+              </div>
+            )}
           </div>
+
+          {/* ── 搜索结果（按平台分类） ─────────────────────────── */}
+          {Object.keys(searchResults).length > 0 && (() => {
+            const platformIds = Object.keys(searchResults);
+            const displayVideos = activeSearchPlatform === "all"
+              ? allSortedResults
+              : (searchResults[activeSearchPlatform] || []).sort((a, b) => b.heat_score - a.heat_score);
+
+            return (
+              <div className="mt-8 w-full max-w-7xl space-y-4">
+                {/* 标题行 */}
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-bold text-white/70">
+                    搜索结果 · {allSortedResults.length} 个视频
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={() => { setSearchResults({}); setSearchErrors([]); setUrl(""); setActiveSearchPlatform("all"); }}
+                    className="text-xs text-white/30 hover:text-white/50 transition-colors"
+                  >
+                    清除结果
+                  </button>
+                </div>
+
+                {/* 平台切换标签 */}
+                <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-1">
+                  <button
+                    type="button"
+                    onClick={() => setActiveSearchPlatform("all")}
+                    className={`shrink-0 rounded-xl border px-4 py-2 text-xs font-bold transition-all ${
+                      activeSearchPlatform === "all"
+                        ? "border-[#D94E28]/60 bg-[#D94E28]/15 text-[#FF8A65]"
+                        : "border-white/10 bg-white/5 text-white/40 hover:bg-white/10 hover:text-white/60"
+                    }`}
+                  >
+                    全部 ({allSortedResults.length})
+                  </button>
+                  {platformIds.map((pid) => {
+                    const pinfo = PLATFORM_MAP[pid] || { name: pid, color: "#666", icon: "🎬" };
+                    const count = searchResults[pid].length;
+                    const isActive = activeSearchPlatform === pid;
+                    return (
+                      <button
+                        key={pid}
+                        type="button"
+                        onClick={() => setActiveSearchPlatform(pid)}
+                        className={`shrink-0 rounded-xl border px-4 py-2 text-xs font-bold transition-all flex items-center gap-1.5 ${
+                          isActive
+                            ? "text-white border-white/25 bg-white/10"
+                            : "border-white/10 bg-white/5 text-white/40 hover:bg-white/10 hover:text-white/60"
+                        }`}
+                        style={isActive ? { borderColor: `${pinfo.color}60`, backgroundColor: `${pinfo.color}15` } : {}}
+                      >
+                        <span>{pinfo.icon}</span>
+                        <span>{pinfo.name}</span>
+                        <span className="ml-0.5 text-[10px] opacity-60">({count})</span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* 视频卡片网格 */}
+                <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
+                  {displayVideos.map((video, idx) => {
+                    const pinfo = PLATFORM_MAP[video.platform] || { name: video.platform, color: "#666", icon: "🎬" };
+                    return (
+                      <a
+                        key={`${video.platform}-${video.url}-${idx}`}
+                        href={video.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="group relative overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04] backdrop-blur-xl transition-all hover:border-white/25 hover:bg-white/[0.08] hover:shadow-lg"
+                      >
+                        {/* 封面 */}
+                        {video.cover_url && (
+                          <div className="relative aspect-video overflow-hidden bg-black/20">
+                            <img
+                              src={video.cover_url}
+                              alt={video.title}
+                              className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                              loading="lazy"
+                              onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                            />
+                            {/* 时长角标 */}
+                            {video.duration > 0 && (
+                              <span className="absolute bottom-2 right-2 rounded bg-black/70 px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-white/90">
+                                {formatDuration(video.duration)}
+                              </span>
+                            )}
+                            {/* 平台标签 */}
+                            <span
+                              className="absolute top-2 left-2 rounded-full px-2.5 py-1 text-[10px] font-bold text-white/90 backdrop-blur-sm"
+                              style={{ backgroundColor: `${pinfo.color}cc` }}
+                            >
+                              {pinfo.icon} {pinfo.name}
+                            </span>
+                            {/* 热度分 */}
+                            <div className="absolute top-2 right-2 flex items-center gap-1 rounded-full bg-black/60 backdrop-blur-sm px-2 py-1">
+                              <TrendingUp className="h-3 w-3 text-[#FF8A65]" />
+                              <span className="text-[10px] font-bold text-[#FF8A65] tabular-nums">{video.heat_score}</span>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* 信息区 */}
+                        <div className="p-4">
+                          <h4 className="text-sm font-semibold leading-5 text-white/90 line-clamp-2 group-hover:text-[#ffd3c4] transition-colors">
+                            {video.title || "无标题"}
+                          </h4>
+                          <div className="mt-2 flex items-center gap-3 text-xs text-white/40">
+                            {video.author && <span className="truncate max-w-[120px]">{video.author}</span>}
+                            {video.publish_time && <span>{video.publish_time}</span>}
+                          </div>
+                          <div className="mt-2 flex items-center gap-3 text-xs text-white/35">
+                            {video.play_count > 0 && (
+                              <span className="flex items-center gap-1">
+                                <Play className="h-3 w-3" />
+                                {formatCount(video.play_count)}
+                              </span>
+                            )}
+                            {video.like_count > 0 && (
+                              <span className="flex items-center gap-1">
+                                <Heart className="h-3 w-3" />
+                                {formatCount(video.like_count)}
+                              </span>
+                            )}
+                            {video.comment_count > 0 && (
+                              <span className="flex items-center gap-1">
+                                <MessageCircle className="h-3 w-3" />
+                                {formatCount(video.comment_count)}
+                              </span>
+                            )}
+                          </div>
+                          {/* 热度进度条 */}
+                          <div className="mt-2.5 h-1.5 w-full overflow-hidden rounded-full bg-white/10">
+                            <div
+                              className="h-full rounded-full bg-gradient-to-r from-[#D94E28] to-[#FF8A65] transition-all"
+                              style={{ width: `${Math.min(video.heat_score, 100)}%` }}
+                            />
+                          </div>
+                        </div>
+                      </a>
+                    );
+                  })}
+                </div>
+
+                {/* 空结果提示 */}
+                {displayVideos.length === 0 && (
+                  <div className="py-10 text-center text-sm text-white/35">
+                    该平台暂无搜索结果
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* ── 解析结果区域 ─────────────────────────────── */}
           {result && (

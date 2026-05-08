@@ -2,16 +2,77 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { taskApi } from "@/lib/tasks-api";
-import { FullPipelineRequest, JobStatusResponse, JobStatus, STEP_LABELS, STEP_ORDER, calculateProgress } from "@/types/task";
+import { taskApi, KnowledgeCollection } from "@/lib/tasks-api";
+import { FullPipelineRequest, JobStatusResponse, JobStatus, STEP_LABELS, calculateProgress, getVisibleStepOrder } from "@/types/task";
 import {
   STORAGE_KEY_API,
   STORAGE_KEY_WECHAT_APPID,
   STORAGE_KEY_WECHAT_SECRET,
   STORAGE_KEY_INLINE_IMAGES,
+  STORAGE_KEY_AI_PROVIDER,
+  STORAGE_KEY_TEXT_MODEL,
+  STORAGE_KEY_IMAGE_MODEL,
+  STORAGE_KEY_RAG_COLLECTION,
+  STORAGE_KEY_RAG_TOP_K,
+  STORAGE_KEY_RAG_EMBEDDING_MODEL,
+  STORAGE_KEY_RAG_EMBEDDING_PROVIDER,
   readStoredRetrySettings,
 } from "@/lib/task-settings";
 import Navbar from "@/components/navbar";
+
+// ── 步骤图标 ────────────────────────────────────────────────────────────────
+const STEP_ICONS: Record<string, React.ReactNode> = {
+  download: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+      <polyline points="7 10 12 15 17 10" />
+      <line x1="12" y1="15" x2="12" y2="3" />
+    </svg>
+  ),
+  extract_audio: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M9 18V5l12-2v13" />
+      <circle cx="6" cy="18" r="3" />
+      <circle cx="18" cy="16" r="3" />
+    </svg>
+  ),
+  transcribe: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" />
+      <path d="M19 10v2a7 7 0 01-14 0v-2" />
+      <line x1="12" y1="19" x2="12" y2="23" />
+      <line x1="8" y1="23" x2="16" y2="23" />
+    </svg>
+  ),
+  generate_article: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
+      <polyline points="14 2 14 8 20 8" />
+      <line x1="16" y1="13" x2="8" y2="13" />
+      <line x1="16" y1="17" x2="8" y2="17" />
+      <polyline points="10 9 9 9 8 9" />
+    </svg>
+  ),
+  generate_image: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+      <circle cx="8.5" cy="8.5" r="1.5" />
+      <polyline points="21 15 16 10 5 21" />
+    </svg>
+  ),
+  convert_html: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="16 18 22 12 16 6" />
+      <polyline points="8 6 2 12 8 18" />
+    </svg>
+  ),
+  publish_draft: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <line x1="22" y1="2" x2="11" y2="13" />
+      <polygon points="22 2 15 22 11 13 2 9 22 2" />
+    </svg>
+  ),
+};
 
 function VideoBackground() {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -214,7 +275,14 @@ export default function Home() {
   const [wechatAppid, setWechatAppid] = useState("");
   const [wechatAppsecret, setWechatAppsecret] = useState("");
   const [generateInlineImages, setGenerateInlineImages] = useState(false);
-  const [publishToWechat, setPublishToWechat] = useState(false);
+  const [aiProvider, setAiProvider] = useState<"siliconflow" | "zhipu">("siliconflow");
+  const [textModel, setTextModel] = useState("");
+  const [imageModel, setImageModel] = useState("");
+  const [ragCollection, setRagCollection] = useState("");
+  const [ragTopK, setRagTopK] = useState(5);
+  const [ragEmbeddingModel, setRagEmbeddingModel] = useState("");
+  const [ragEmbeddingProvider, setRagEmbeddingProvider] = useState<"siliconflow" | "zhipu">("zhipu");
+  const [collections, setCollections] = useState<KnowledgeCollection[]>([]);
   const [showSettings, setShowSettings] = useState(false);
   const [loading, setLoading] = useState(false);
   const [historyActionError, setHistoryActionError] = useState("");
@@ -239,6 +307,35 @@ export default function Home() {
   const [pausing, setPausing] = useState(false);
 
   // ─── 视频上传状态 ───────────────────────────────────────────
+  const [publicIp, setPublicIp] = useState("");
+  const [ipLoading, setIpLoading] = useState(false);
+  const [ipCopied, setIpCopied] = useState(false);
+
+  const handleQueryIp = async () => {
+    setIpLoading(true);
+    setPublicIp("");
+    setIpCopied(false);
+    try {
+      const res = await fetch("https://myip.ipip.net");
+      const text = await res.text();
+      const match = text.match(/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/);
+      setPublicIp(match ? match[1] : "查询失败，请重试");
+    } catch {
+      setPublicIp("查询失败，请重试");
+    } finally {
+      setIpLoading(false);
+    }
+  };
+
+  const handleCopyIp = async () => {
+    if (!publicIp || publicIp === "查询失败，请重试") return;
+    try {
+      await navigator.clipboard.writeText(publicIp);
+      setIpCopied(true);
+      setTimeout(() => setIpCopied(false), 2000);
+    } catch {}
+  };
+
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadError, setUploadError] = useState("");
@@ -266,7 +363,24 @@ export default function Home() {
     setGenerateInlineImages(
       localStorage.getItem(STORAGE_KEY_INLINE_IMAGES) === "true"
     );
+    const storedProvider = localStorage.getItem(STORAGE_KEY_AI_PROVIDER);
+    if (storedProvider === "zhipu" || storedProvider === "siliconflow") {
+      setAiProvider(storedProvider);
+    }
+    setTextModel(localStorage.getItem(STORAGE_KEY_TEXT_MODEL) || "");
+    setImageModel(localStorage.getItem(STORAGE_KEY_IMAGE_MODEL) || "");
+    setRagCollection(localStorage.getItem(STORAGE_KEY_RAG_COLLECTION) || "");
+    setRagTopK(parseInt(localStorage.getItem(STORAGE_KEY_RAG_TOP_K) || "5", 10));
+    setRagEmbeddingModel(localStorage.getItem(STORAGE_KEY_RAG_EMBEDDING_MODEL) || "");
+    const storedEmbProvider = localStorage.getItem(STORAGE_KEY_RAG_EMBEDDING_PROVIDER);
+    if (storedEmbProvider === "zhipu" || storedEmbProvider === "siliconflow") {
+      setRagEmbeddingProvider(storedEmbProvider);
+    }
     fetchHistory();
+    // 获取知识库集合列表
+    taskApi.listCollections().then((res) => {
+      if (res.success) setCollections(res.data.collections);
+    }).catch(() => {});
   }, [fetchHistory]);
 
   const stopPolling = useCallback(() => {
@@ -276,25 +390,45 @@ export default function Home() {
     }
   }, []);
 
+  const pollOnce = useCallback(async (jobId: string): Promise<boolean> => {
+    try {
+      const job = await taskApi.getJobStatus(jobId);
+      setActiveJob(job);
+      setHistoryJobs((prev) =>
+        prev.map((j) => (j.job_id === jobId ? job : j))
+      );
+      return job.status === JobStatus.SUCCESS || job.status === JobStatus.FAILED;
+    } catch {
+      return false;
+    }
+  }, []);
+
   const startPolling = useCallback((jobId: string) => {
     stopPolling();
-    pollingRef.current = setInterval(async () => {
-      try {
-        const job = await taskApi.getJobStatus(jobId);
-        setActiveJob(job);
-        // 同步刷新历史列表中该任务的状态
-        setHistoryJobs((prev) =>
-          prev.map((j) => (j.job_id === jobId ? job : j))
-        );
-        if (job.status === JobStatus.SUCCESS || job.status === JobStatus.FAILED || job.status === JobStatus.PAUSED) {
-          stopPolling();
-          fetchHistory();
-        }
-      } catch {
-        stopPolling();
+    // 立即执行一次轮询，避免等待首个 interval
+    pollOnce(jobId).then((done) => {
+      if (done) {
+        fetchHistory();
+        return;
       }
-    }, 3000);
-  }, [stopPolling]);
+      let consecutiveErrors = 0;
+      pollingRef.current = setInterval(async () => {
+        try {
+          const isDone = await pollOnce(jobId);
+          consecutiveErrors = 0;
+          if (isDone) {
+            stopPolling();
+            fetchHistory();
+          }
+        } catch {
+          consecutiveErrors += 1;
+          if (consecutiveErrors >= 5) {
+            stopPolling();
+          }
+        }
+      }, 5000);
+    });
+  }, [stopPolling, fetchHistory, pollOnce]);
 
   useEffect(() => {
     return () => stopPolling();
@@ -363,7 +497,7 @@ export default function Home() {
     // ── 上传视频分支：有 uploadedJobId 则 resume ──
     if (uploadedJobId && !url.trim()) {
       const missing: string[] = [];
-      if (!apiKey.trim()) missing.push("SiliconFlow API Key");
+      if (!apiKey.trim()) missing.push("AI 服务 API Key");
       if (!wechatAppid.trim()) missing.push("微信小程序 AppID");
       if (!wechatAppsecret.trim()) missing.push("微信小程序 AppSecret");
 
@@ -384,15 +518,14 @@ export default function Home() {
       try {
         const res = await taskApi.resumeJob(uploadedJobId, {
           api_key: apiKey.trim() || undefined,
+          ai_provider: aiProvider,
+          text_model: textModel.trim() || undefined,
+          image_model: imageModel.trim() || undefined,
           wechat_appid: wechatAppid.trim() || undefined,
           wechat_appsecret: wechatAppsecret.trim() || undefined,
         });
 
         if (res.success) {
-          try {
-            const job = await taskApi.getJobStatus(uploadedJobId);
-            setActiveJob(job);
-          } catch {}
           startPolling(uploadedJobId);
           setUploadedJobId("");
           setUploadedFileName("");
@@ -416,7 +549,7 @@ export default function Home() {
     }
 
     const missing: string[] = [];
-    if (!apiKey.trim()) missing.push("SiliconFlow API Key");
+    if (!apiKey.trim()) missing.push("AI 服务 API Key");
     if (!wechatAppid.trim()) missing.push("微信小程序 AppID");
     if (!wechatAppsecret.trim()) missing.push("微信小程序 AppSecret");
 
@@ -432,28 +565,34 @@ export default function Home() {
     if (apiKey.trim()) localStorage.setItem(STORAGE_KEY_API, apiKey.trim());
     if (wechatAppid.trim()) localStorage.setItem(STORAGE_KEY_WECHAT_APPID, wechatAppid.trim());
     if (wechatAppsecret.trim()) localStorage.setItem(STORAGE_KEY_WECHAT_SECRET, wechatAppsecret.trim());
-    localStorage.setItem(
-      STORAGE_KEY_INLINE_IMAGES,
-      String(generateInlineImages)
-    );
+    localStorage.setItem(STORAGE_KEY_INLINE_IMAGES, String(generateInlineImages));
+    localStorage.setItem(STORAGE_KEY_AI_PROVIDER, aiProvider);
+    localStorage.setItem(STORAGE_KEY_TEXT_MODEL, textModel.trim());
+    localStorage.setItem(STORAGE_KEY_IMAGE_MODEL, imageModel.trim());
+    localStorage.setItem(STORAGE_KEY_RAG_COLLECTION, ragCollection);
+    localStorage.setItem(STORAGE_KEY_RAG_TOP_K, String(ragTopK));
+    localStorage.setItem(STORAGE_KEY_RAG_EMBEDDING_MODEL, ragEmbeddingModel.trim());
+    localStorage.setItem(STORAGE_KEY_RAG_EMBEDDING_PROVIDER, ragEmbeddingProvider);
 
     try {
       const req: FullPipelineRequest = {
         share_text: url.trim(),
         siliconflow_api_key: apiKey.trim(),
+        ai_provider: aiProvider,
         wechat_appid: wechatAppid.trim() || undefined,
         wechat_appsecret: wechatAppsecret.trim() || undefined,
+        text_model: textModel.trim() || undefined,
+        image_model: imageModel.trim() || undefined,
         generate_inline_images: generateInlineImages,
-        skip_publish: !publishToWechat,
+        rag_collection: ragCollection || undefined,
+        rag_top_k: ragTopK,
+        rag_embedding_model: ragEmbeddingModel.trim() || undefined,
+        rag_embedding_provider: ragEmbeddingProvider,
       };
 
       const result = await taskApi.runFullPipeline(req);
 
       if (result.success && result.job_id) {
-        try {
-          const job = await taskApi.getJobStatus(result.job_id);
-          setActiveJob(job);
-        } catch {}
         startPolling(result.job_id);
       } else {
         setRunningWarning({ title: "任务提交失败", description: result.message || "请重试" });
@@ -571,10 +710,20 @@ export default function Home() {
   const handleRetryHistoryJob = async (jobId: string) => {
     setHistoryActionError("");
     setHistoryAction({ jobId, type: "retry" });
+    // 重试前先保存当前配置到 localStorage，确保读到最新值
+    if (apiKey.trim()) localStorage.setItem(STORAGE_KEY_API, apiKey.trim());
+    if (wechatAppid.trim()) localStorage.setItem(STORAGE_KEY_WECHAT_APPID, wechatAppid.trim());
+    if (wechatAppsecret.trim()) localStorage.setItem(STORAGE_KEY_WECHAT_SECRET, wechatAppsecret.trim());
+    localStorage.setItem(STORAGE_KEY_AI_PROVIDER, aiProvider);
+    localStorage.setItem(STORAGE_KEY_TEXT_MODEL, textModel.trim());
+    localStorage.setItem(STORAGE_KEY_IMAGE_MODEL, imageModel.trim());
     try {
       const settings = readStoredRetrySettings();
       await taskApi.retryFailedJob(jobId, {
         api_key: settings.apiKey || undefined,
+        ai_provider: settings.aiProvider,
+        text_model: settings.textModel || undefined,
+        image_model: settings.imageModel || undefined,
         wechat_appid: settings.wechatAppid || undefined,
         wechat_appsecret: settings.wechatAppsecret || undefined,
       });
@@ -633,10 +782,20 @@ export default function Home() {
   const handleResumeHistoryJob = async (jobId: string) => {
     setHistoryActionError("");
     setHistoryAction({ jobId, type: "retry" });
+    // 继续前先保存当前配置到 localStorage，确保读到最新值
+    if (apiKey.trim()) localStorage.setItem(STORAGE_KEY_API, apiKey.trim());
+    if (wechatAppid.trim()) localStorage.setItem(STORAGE_KEY_WECHAT_APPID, wechatAppid.trim());
+    if (wechatAppsecret.trim()) localStorage.setItem(STORAGE_KEY_WECHAT_SECRET, wechatAppsecret.trim());
+    localStorage.setItem(STORAGE_KEY_AI_PROVIDER, aiProvider);
+    localStorage.setItem(STORAGE_KEY_TEXT_MODEL, textModel.trim());
+    localStorage.setItem(STORAGE_KEY_IMAGE_MODEL, imageModel.trim());
     try {
       const settings = readStoredRetrySettings();
       await taskApi.resumeJob(jobId, {
         api_key: settings.apiKey || undefined,
+        ai_provider: settings.aiProvider,
+        text_model: settings.textModel || undefined,
+        image_model: settings.imageModel || undefined,
         wechat_appid: settings.wechatAppid || undefined,
         wechat_appsecret: settings.wechatAppsecret || undefined,
       });
@@ -660,6 +819,7 @@ export default function Home() {
   };
 
   const progress = activeJob ? calculateProgress(activeJob) : 0;
+  const activeStepOrder = activeJob ? getVisibleStepOrder(activeJob) : [];
   const currentStepLabel = activeJob?.current_step
     ? STEP_LABELS[activeJob.current_step] || activeJob.current_step
     : null;
@@ -829,17 +989,75 @@ export default function Home() {
                 <h3 className="text-sm font-bold text-white/80">高级设置</h3>
               </div>
               <div className="space-y-4 px-6 py-5">
+                {/* AI 服务商选择器 */}
+                <div>
+                  <label className="mb-2 block text-xs font-bold uppercase tracking-wider text-white/50">
+                    AI 服务商
+                  </label>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setAiProvider("siliconflow")}
+                      className={`flex-1 rounded-xl border px-4 py-2.5 text-sm font-medium transition-all ${
+                        aiProvider === "siliconflow"
+                          ? "border-[#D94E28] bg-[#D94E28]/20 text-white"
+                          : "border-white/15 bg-white/10 text-white/60 hover:bg-white/15"
+                      }`}
+                    >
+                      SiliconFlow
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAiProvider("zhipu")}
+                      className={`flex-1 rounded-xl border px-4 py-2.5 text-sm font-medium transition-all ${
+                        aiProvider === "zhipu"
+                          ? "border-[#D94E28] bg-[#D94E28]/20 text-white"
+                          : "border-white/15 bg-white/10 text-white/60 hover:bg-white/15"
+                      }`}
+                    >
+                      智谱 AI
+                    </button>
+                  </div>
+                </div>
+
                 <div>
                   <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-white/50">
-                    SiliconFlow API Key <span className="text-red-400">*</span>
+                    {aiProvider === "zhipu" ? "智谱 API Key" : "SiliconFlow API Key"} <span className="text-red-400">*</span>
                   </label>
                   <input
                     type="password"
-                    placeholder="sk-..."
+                    placeholder={aiProvider === "zhipu" ? "从智谱 AI 开放平台获取" : "sk-..."}
                     value={apiKey}
                     onChange={(e) => setApiKey(e.target.value)}
                     className="w-full rounded-xl border border-white/15 bg-white/10 px-4 py-2.5 text-sm text-white placeholder:text-white/30 focus:border-[#D94E28]/50 focus:outline-none focus:bg-white/15 transition-colors"
                   />
+                </div>
+
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div>
+                    <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-white/50">
+                      文章生成模型
+                    </label>
+                    <input
+                      type="text"
+                      placeholder={aiProvider === "zhipu" ? "glm-4-flash（默认）" : "Qwen/Qwen3-14B（默认）"}
+                      value={textModel}
+                      onChange={(e) => setTextModel(e.target.value)}
+                      className="w-full rounded-xl border border-white/15 bg-white/10 px-4 py-2.5 text-sm text-white placeholder:text-white/30 focus:border-[#D94E28]/50 focus:outline-none focus:bg-white/15 transition-colors"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-white/50">
+                      图片生成模型
+                    </label>
+                    <input
+                      type="text"
+                      placeholder={aiProvider === "zhipu" ? "cogview-3（默认）" : "black-forest-labs/FLUX.1-schnell（默认）"}
+                      value={imageModel}
+                      onChange={(e) => setImageModel(e.target.value)}
+                      className="w-full rounded-xl border border-white/15 bg-white/10 px-4 py-2.5 text-sm text-white placeholder:text-white/30 focus:border-[#D94E28]/50 focus:outline-none focus:bg-white/15 transition-colors"
+                    />
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -869,6 +1087,68 @@ export default function Home() {
                   </div>
                 </div>
 
+                {/* 公网 IP 查询 */}
+                <div>
+                  <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-white/50">
+                    公网 IP 查询
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleQueryIp}
+                      disabled={ipLoading}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/10 px-4 py-2.5 text-sm font-bold text-white/70 transition-all hover:border-white/25 hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <svg className={`h-4 w-4 ${ipLoading ? "animate-spin" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <circle cx="12" cy="12" r="10" />
+                        <path strokeLinecap="round" d="M2 12h4m12 0h4M12 2v4m0 12v4" />
+                      </svg>
+                      {ipLoading ? "查询中..." : "查询公网 IP"}
+                    </button>
+                    {publicIp && (
+                      <>
+                        <span className="rounded-xl border border-white/15 bg-white/10 px-4 py-2.5 text-sm font-mono text-white/80">
+                          {publicIp}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={handleCopyIp}
+                          title="复制 IP"
+                          className="inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/10 px-3 py-2.5 text-sm font-bold text-white/70 transition-all hover:border-white/25 hover:bg-white/15"
+                        >
+                          {ipCopied ? (
+                            <svg className="h-4 w-4 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <polyline points="20 6 9 17 4 12" />
+                            </svg>
+                          ) : (
+                            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                              <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
+                            </svg>
+                          )}
+                        </button>
+                        <a
+                          href="https://developers.weixin.qq.com/console/product/mp/wxfd4b3edcc57e114d?tab1=basicInfo&tab2=dev"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title="前往微信公众平台"
+                          className="inline-flex items-center gap-1.5 rounded-full border border-[#D94E28]/40 bg-[#D94E28]/15 px-3 py-2.5 text-sm font-bold text-[#FF8A65] transition-all hover:border-[#D94E28]/60 hover:bg-[#D94E28]/25"
+                        >
+                          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
+                            <polyline points="15 3 21 3 21 9" />
+                            <line x1="10" y1="14" x2="21" y2="3" />
+                          </svg>
+                          跳转
+                        </a>
+                      </>
+                    )}
+                  </div>
+                  <p className="mt-1.5 text-[11px] text-white/30">
+                    查询本机公网 IP，用于微信公众号 IP 白名单配置
+                  </p>
+                </div>
+
                 <div className="flex flex-wrap gap-6 pt-1">
                   <label className="flex cursor-pointer items-center gap-2 text-sm text-white/70">
                     <input
@@ -879,15 +1159,100 @@ export default function Home() {
                     />
                     生成文中插图
                   </label>
-                  <label className="flex cursor-pointer items-center gap-2 text-sm text-white/70">
+                </div>
+
+                {/* RAG 知识库设置 */}
+                <div className="border-t border-white/10 pt-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <label className="text-xs font-bold uppercase tracking-wider text-white/50">
+                      RAG 知识库增强
+                    </label>
+                    <a
+                      href="/knowledge"
+                      className="text-[11px] text-[#FF8A65] hover:text-[#D94E28] transition-colors"
+                    >
+                      管理知识库 →
+                    </a>
+                  </div>
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <div>
+                      <label className="mb-1.5 block text-xs text-white/40">知识库集合</label>
+                      <select
+                        value={ragCollection}
+                        onChange={(e) => setRagCollection(e.target.value)}
+                        className="w-full rounded-xl border border-white/15 bg-white/10 px-4 py-2.5 text-sm text-white focus:border-[#D94E28]/50 focus:outline-none appearance-none"
+                      >
+                        <option value="" className="bg-gray-800">不使用 RAG</option>
+                        {collections.map((c) => (
+                          <option key={c.id} value={c.name} className="bg-gray-800">
+                            {c.name} ({c.document_count} 文档, {c.chunk_count} 块)
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="mb-1.5 block text-xs text-white/40">
+                        检索数量 (Top K): {ragTopK}
+                      </label>
+                      <input
+                        type="range"
+                        min={1}
+                        max={10}
+                        value={ragTopK}
+                        onChange={(e) => setRagTopK(parseInt(e.target.value, 10))}
+                        className="w-full accent-[#D94E28]"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-xs text-white/40">
+                      向量模型服务商
+                    </label>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setRagEmbeddingProvider("siliconflow")}
+                        className={`flex-1 rounded-xl border px-4 py-2.5 text-sm font-medium transition-all ${
+                          ragEmbeddingProvider === "siliconflow"
+                            ? "border-[#D94E28] bg-[#D94E28]/20 text-white"
+                            : "border-white/15 bg-white/10 text-white/60 hover:bg-white/15"
+                        }`}
+                      >
+                        SiliconFlow
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setRagEmbeddingProvider("zhipu")}
+                        className={`flex-1 rounded-xl border px-4 py-2.5 text-sm font-medium transition-all ${
+                          ragEmbeddingProvider === "zhipu"
+                            ? "border-[#D94E28] bg-[#D94E28]/20 text-white"
+                            : "border-white/15 bg-white/10 text-white/60 hover:bg-white/15"
+                        }`}
+                      >
+                        智谱 AI
+                      </button>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-xs text-white/40">
+                      向量模型 (Embedding)
+                    </label>
                     <input
-                      type="checkbox"
-                      checked={publishToWechat}
-                      onChange={(e) => setPublishToWechat(e.target.checked)}
-                      className="h-4 w-4 rounded border-white/30 text-[#D94E28] focus:ring-[#D94E28] bg-white/10"
+                      type="text"
+                      placeholder={ragEmbeddingProvider === "zhipu" ? "embedding-3（默认）" : "Qwen/Qwen3-Embedding-8B（默认）"}
+                      value={ragEmbeddingModel}
+                      onChange={(e) => setRagEmbeddingModel(e.target.value)}
+                      className="w-full rounded-xl border border-white/15 bg-white/10 px-4 py-2.5 text-sm text-white placeholder:text-white/30 focus:border-[#D94E28]/50 focus:outline-none focus:bg-white/15 transition-colors"
                     />
-                    草稿传入微信公众号
-                  </label>
+                    <p className="mt-1 text-[11px] text-white/25">
+                      {ragEmbeddingProvider === "zhipu"
+                        ? "智谱 embedding-3 模型，用于将文本转换为向量进行相似度检索"
+                        : "SiliconFlow 向量模型，用于将文本转换为向量进行相似度检索"}
+                    </p>
+                  </div>
+                  <p className="mt-2 text-[11px] text-white/25">
+                    启用后，文章生成时会从知识库检索相关背景知识注入 prompt，提升文章质量和专业度
+                  </p>
                 </div>
               </div>
             </div>
@@ -921,42 +1286,80 @@ export default function Home() {
                       暂停
                     </button>
                   )}
-                  <span className="text-sm font-bold text-white/50">{progress}%</span>
                 </div>
               </div>
-              <div className="h-1.5 w-full bg-white/10">
-                <div
-                  className={`h-full transition-all duration-500 ${
-                    isJobFailed ? "bg-red-400" : isJobDone ? "bg-green-500" : isJobPaused ? "bg-amber-400" : "bg-[#D94E28]"
-                  }`}
-                  style={{ width: `${progress}%` }}
-                />
-              </div>
-              <div className="flex flex-wrap gap-1.5 px-5 py-3">
-                {STEP_ORDER.map((stepName) => {
-                  const stepResult = activeJob.steps.find((s) => s.step === stepName);
-                  const isActive = activeJob.current_step === stepName;
-                  let stepStatus: "pending" | "running" | "success" | "failed" = "pending";
-                  if (stepResult) {
-                    if (stepResult.status === JobStatus.SUCCESS) stepStatus = "success";
-                    else if (stepResult.status === JobStatus.FAILED) stepStatus = "failed";
-                    else if (stepResult.status === JobStatus.RUNNING || isActive) stepStatus = "running";
-                  }
-                  const styleMap = {
-                    pending: "bg-white/10 text-white/30",
-                    running: "bg-blue-500/20 text-blue-300 ring-1 ring-blue-400/40 animate-pulse",
-                    success: "bg-green-500/20 text-green-300",
-                    failed: "bg-red-500/20 text-red-300",
-                  };
-                  return (
-                    <span
-                      key={stepName}
-                      className={`inline-flex items-center rounded-md px-2 py-0.5 text-[10px] font-bold ${styleMap[stepStatus]}`}
-                    >
-                      {STEP_LABELS[stepName]}
-                    </span>
-                  );
-                })}
+                {/* ── 步骤流程图 ─────────────────────────────────────────── */}
+                <div className="px-5 py-5">
+                  <div className="flex items-start justify-between">
+                  {activeStepOrder.map((stepName, idx) => {
+                    const stepResult = activeJob.steps.find((s) => s.step === stepName);
+                    const isActive = activeJob.current_step === stepName;
+                    let stepStatus: "pending" | "running" | "success" | "failed" = "pending";
+                    if (stepResult) {
+                      if (stepResult.status === JobStatus.SUCCESS) stepStatus = "success";
+                      else if (stepResult.status === JobStatus.FAILED) stepStatus = "failed";
+                      else if (stepResult.status === JobStatus.RUNNING || isActive) stepStatus = "running";
+                    }
+                    const isLast = idx === activeStepOrder.length - 1;
+
+                    const circleBase = "relative z-10 flex h-9 w-9 sm:h-10 sm:w-10 shrink-0 items-center justify-center rounded-full transition-all duration-300";
+                    const circleStyle = {
+                      pending: "bg-white/5 border border-white/15 text-white/25",
+                      running: "bg-[#D94E28]/15 border-2 border-[#D94E28] text-[#FF8A65] shadow-lg shadow-[#D94E28]/20",
+                      success: "bg-emerald-500/15 border border-emerald-400/40 text-emerald-400",
+                      failed: "bg-red-500/15 border border-red-400/40 text-red-400",
+                    };
+                    const lineStyle = {
+                      pending: "bg-white/10",
+                      running: "bg-gradient-to-r from-[#D94E28] to-white/10",
+                      success: "bg-emerald-500/50",
+                      failed: "bg-red-500/40",
+                    };
+
+                    return (
+                      <div key={stepName} className="flex flex-1 items-start">
+                        <div className="flex flex-col items-center gap-1.5 sm:gap-2">
+                          {/* 圆圈 + 图标 */}
+                          <div className={`${circleBase} ${circleStyle[stepStatus]} ${stepStatus === "running" ? "animate-pulse" : ""}`}>
+                            {stepStatus === "success" ? (
+                              <svg className="h-4 w-4 sm:h-5 sm:w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
+                                <polyline points="20 6 9 17 4 12" />
+                              </svg>
+                            ) : stepStatus === "failed" ? (
+                              <svg className="h-4 w-4 sm:h-5 sm:w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
+                                <line x1="18" y1="6" x2="6" y2="18" />
+                                <line x1="6" y1="6" x2="18" y2="18" />
+                              </svg>
+                            ) : (
+                              <div className="h-4 w-4 sm:h-5 sm:w-5">{STEP_ICONS[stepName]}</div>
+                            )}
+                            {/* 运行中光圈 */}
+                            {stepStatus === "running" && (
+                              <span className="absolute inset-0 rounded-full border-2 border-[#D94E28] animate-ping opacity-30" />
+                            )}
+                          </div>
+                          {/* 标签 */}
+                          <span className={`hidden sm:block text-[11px] font-bold leading-tight text-center ${
+                            stepStatus === "running" ? "text-[#FF8A65]" :
+                            stepStatus === "success" ? "text-emerald-400" :
+                            stepStatus === "failed" ? "text-red-400" :
+                            "text-white/30"
+                          }`}>
+                            {STEP_LABELS[stepName]}
+                          </span>
+                        </div>
+                        {/* 连接线 */}
+                        {!isLast && (
+                          <div className="flex-1 flex items-center pt-4 sm:pt-5 px-0.5">
+                            <div className={`h-0.5 w-full rounded-full transition-all duration-500 ${
+                              lineStyle[stepStatus]
+                            }`} />
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
               {isJobFailed && activeJob.error && (
                 <div className="border-t border-white/10 px-5 py-3 text-left text-sm text-red-400">
@@ -1056,9 +1459,10 @@ export default function Home() {
                       {historyActionError}
                     </div>
                   )}
-                  {historyJobs.map((job) => {
-                    const jobProgress = calculateProgress(job);
-                    const completedCount = job.steps.filter((s) => s.status === JobStatus.SUCCESS).length;
+                    {historyJobs.map((job) => {
+                      const jobProgress = calculateProgress(job);
+                      const historyStepOrder = getVisibleStepOrder(job);
+                      const completedCount = job.steps.filter((s) => s.status === JobStatus.SUCCESS).length;
                     const failedStep = job.steps.find((s) => s.status === JobStatus.FAILED);
                     const articleStep = job.steps.find((s) => s.step === "generate_article");
                     const jobTitle = articleStep?.data?.title || `任务 #${job.job_id.slice(0, 8)}`;
@@ -1140,9 +1544,9 @@ export default function Home() {
                               style={{ width: `${jobProgress}%` }}
                             />
                           </div>
-                          <span className="shrink-0 text-[10px] font-bold text-white/35">
-                            {completedCount}/{STEP_ORDER.length}
-                          </span>
+                            <span className="shrink-0 text-[10px] font-bold text-white/35">
+                              {completedCount}/{historyStepOrder.length}
+                            </span>
                         </div>
                         <div className="mt-3 flex items-center justify-between gap-3 border-t border-white/10 pt-3">
                           <div className="text-left text-[11px] text-white/35">

@@ -72,9 +72,11 @@ class PipelineJob:
 
     # ── Step 4 产物：AI JSON 结构化输出 ───────────────────────────────────────
     article_title: str | None = None            # {"title": "..."}
+    article_body_markdown: str | None = None    # {"content": "## 标题\n\n段落【图片占位符:img_01】"}
     article_body_html: str | None = None        # {"content": "<p>...【图片占位符:img_01】...</p>"}
     article_image_prompts: list | None = None   # [{"id":"img_01","prompt":"..."}]
     generate_inline_images: bool = True         # Step4 写入，False 时仅封面
+    skip_publish: bool = False                  # 一键流程是否跳过 Step7 发布草稿
 
     # ── Step 5 产物：图片生成 & 微信素材上传 ─────────────────────────────────
     image_path: str | None = None               # 封面图（第一张）绝对路径
@@ -146,9 +148,11 @@ class PipelineStore:
             image_paths=model.image_paths or [],
             image_urls=model.image_urls or [],
             article_title=model.article_title,
+            article_body_markdown=model.article_body_markdown,
             article_body_html=model.article_body_html,
             article_image_prompts=model.article_image_prompts,
             generate_inline_images=model.generate_inline_images,
+            skip_publish=model.skip_publish,
             image_path=model.image_path,
             wechat_image_map=model.wechat_image_map,
             article_html=model.article_html,
@@ -181,9 +185,11 @@ class PipelineStore:
         model.transcript_text = job.transcript_text
 
         model.article_title = job.article_title
+        model.article_body_markdown = job.article_body_markdown
         model.article_body_html = job.article_body_html
         model.article_image_prompts = job.article_image_prompts
         model.generate_inline_images = job.generate_inline_images
+        model.skip_publish = job.skip_publish
 
         model.image_path = job.image_path
         model.wechat_image_map = job.wechat_image_map

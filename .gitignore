@@ -56,8 +56,17 @@ coverage/
 .mypy_cache/
 .pytest_cache/
 
+# Next.js build artifacts
+*.tsbuildinfo
+
 # Downloaded media (large files)
 downloads/
 output/
 temp/
 tmp/
+
+# YouTube cookies (contains authentication tokens - never commit)
+backed/cookies_youtube.txt
+
+# Media output data directory
+backed/data/

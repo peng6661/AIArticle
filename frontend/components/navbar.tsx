@@ -22,7 +22,17 @@ export default function Navbar() {
           AIcreator
         </p>
 
-        <div className="flex shrink-0 items-center">
+        <div className="flex shrink-0 items-center gap-2">
+          <Link
+            href="/knowledge"
+            className={`rounded-full border px-4 py-2 text-sm font-bold transition-all ${
+              pathname === "/knowledge"
+                ? "border-[#D94E28]/60 bg-[#D94E28]/15 text-[#FF8A65]"
+                : "border-white/15 bg-white/5 text-white/60 hover:border-white/25 hover:bg-white/10 hover:text-white/80"
+            }`}
+          >
+            知识库
+          </Link>
           <Link
             href={isDownloadPage ? "/" : "/download"}
             className="btn-brand !px-5 !py-2.5 text-sm"

@@ -52,6 +52,9 @@ export const taskApi = {
     jobId: string,
     params: {
       api_key?: string;
+      ai_provider?: string;
+      text_model?: string;
+      image_model?: string;
       wechat_appid?: string;
       wechat_appsecret?: string;
     }
@@ -74,6 +77,9 @@ export const taskApi = {
     jobId: string,
     params: {
       api_key?: string;
+      ai_provider?: string;
+      text_model?: string;
+      image_model?: string;
       wechat_appid?: string;
       wechat_appsecret?: string;
     }
@@ -157,6 +163,7 @@ export const taskApi = {
     jobId: string,
     params: {
       api_key: string;
+      ai_provider?: string;
       topic?: string;
       extra_requirements?: string;
       text_model?: string;
@@ -176,6 +183,7 @@ export const taskApi = {
     jobId: string,
     params: {
       api_key: string;
+      ai_provider?: string;
       wechat_appid?: string;
       wechat_appsecret?: string;
       image_model?: string;
@@ -217,4 +225,156 @@ export const taskApi = {
     );
     return data;
   },
+
+  // ── 知识库管理 ──────────────────────────────────────────────
+
+  /** 获取知识库集合列表 */
+  listCollections: async (): Promise<{ success: boolean; data: { collections: KnowledgeCollection[]; total: number } }> => {
+    const { data } = await apiClient.get("/api/knowledge/collections");
+    return data;
+  },
+
+  /** 创建知识库集合 */
+  createCollection: async (name: string, description: string = "") => {
+    const { data } = await apiClient.post("/api/knowledge/collections", { name, description });
+    return data;
+  },
+
+  /** 删除知识库集合 */
+  deleteCollection: async (collectionId: number) => {
+    const { data } = await apiClient.delete(`/api/knowledge/collections/${collectionId}`);
+    return data;
+  },
+
+  /** 上传文本/Markdown 文档 */
+  ingestText: async (collectionName: string, content: string, title: string, sourceType: string, apiKey: string, embeddingModel: string = "", embeddingProvider: string = "") => {
+    const { data } = await apiClient.post("/api/knowledge/documents/text", {
+      collection_name: collectionName,
+      content,
+      title,
+      source_type: sourceType,
+      api_key: apiKey,
+      embedding_model: embeddingModel || undefined,
+      embedding_provider: embeddingProvider || undefined,
+    });
+    return data;
+  },
+
+  /** 上传 PDF 文件 */
+  ingestPdf: async (collectionName: string, file: File, apiKey: string, title: string = "", embeddingModel: string = "", embeddingProvider: string = "") => {
+    const formData = new FormData();
+    formData.append("collection_name", collectionName);
+    formData.append("api_key", apiKey);
+    formData.append("title", title);
+    if (embeddingModel) formData.append("embedding_model", embeddingModel);
+    if (embeddingProvider) formData.append("embedding_provider", embeddingProvider);
+    formData.append("file", file);
+    const { data } = await axios.post(`${API_BASE}/api/knowledge/documents/pdf`, formData, {
+      headers: { "Content-Type": "multipart/form-data" },
+      timeout: 5 * 60 * 1000,
+    });
+    return data;
+  },
+
+  /** 从 pipeline 任务导入 */
+  ingestFromJob: async (collectionName: string, jobId: string, apiKey: string, embeddingModel: string = "", embeddingProvider: string = "") => {
+    const { data } = await apiClient.post("/api/knowledge/documents/from-job", {
+      collection_name: collectionName,
+      job_id: jobId,
+      api_key: apiKey,
+      embedding_model: embeddingModel || undefined,
+      embedding_provider: embeddingProvider || undefined,
+    });
+    return data;
+  },
+
+  /** 获取文档列表 */
+  listDocuments: async (collectionName: string) => {
+    const { data } = await apiClient.get(`/api/knowledge/documents?collection_name=${encodeURIComponent(collectionName)}`);
+    return data;
+  },
+
+  /** 删除文档 */
+  deleteDocument: async (docId: number, collectionName: string) => {
+    const { data } = await apiClient.delete(`/api/knowledge/documents/${docId}?collection_name=${encodeURIComponent(collectionName)}`);
+    return data;
+  },
+
+  /** 测试 RAG 检索 */
+  searchKnowledge: async (collectionName: string, query: string, apiKey: string, topK: number = 5, embeddingModel: string = "", embeddingProvider: string = "") => {
+    const { data } = await apiClient.post("/api/knowledge/search", {
+      collection_name: collectionName,
+      query,
+      api_key: apiKey,
+      top_k: topK,
+      embedding_model: embeddingModel || undefined,
+      embedding_provider: embeddingProvider || undefined,
+    });
+    return data;
+  },
+
+  // ── 多平台视频搜索 ──────────────────────────────────────────────
+
+  /** 获取搜索支持的平台列表 */
+  listSearchPlatforms: async (): Promise<{ success: boolean; platforms: { id: string; name: string }[] }> => {
+    const { data } = await apiClient.get("/api/video/search/platforms");
+    return data;
+  },
+
+  /** 多平台视频搜索（超时 3 分钟，多平台并发较慢） */
+  searchVideos: async (
+    keyword: string,
+    platforms: string[],
+    limit: number = 10
+  ): Promise<{
+    success: boolean;
+    keyword: string;
+    results: Record<string, VideoSearchResult[]>;
+    errors: string[];
+  }> => {
+    const { data } = await apiClient.post("/api/video/search", {
+      keyword,
+      platforms,
+      limit,
+    }, { timeout: 180000 });
+    return data;
+  },
 };
+
+// ── 知识库类型定义 ──────────────────────────────────────────────
+
+export interface KnowledgeCollection {
+  id: number;
+  name: string;
+  description: string;
+  document_count: number;
+  chunk_count: number;
+  created_at: string;
+}
+
+export interface KnowledgeDocument {
+  id: number;
+  title: string;
+  source_type: string;
+  chunk_count: number;
+  status: string;
+  error: string | null;
+  source_job_id: string | null;
+  created_at: string;
+}
+
+export interface VideoSearchResult {
+  title: string;
+  url: string;
+  cover_url: string;
+  platform: string;
+  author: string;
+  play_count: number;
+  like_count: number;
+  comment_count: number;
+  share_count: number;
+  duration: number;
+  publish_time: string;
+  heat_score: number;
+  description: string;
+}

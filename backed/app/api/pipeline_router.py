@@ -162,10 +162,12 @@ def _job_to_schema(job: PipelineJob) -> JobStatusResponse:
             )
             for s in job.steps
         ],
+        skip_publish=job.skip_publish,
         share_text=job.share_text,
         video_path=job.video_path,
         audio_path=job.audio_path,
         transcript_path=job.transcript_path,
+        article_body_markdown=job.article_body_markdown,
         article_html=(
             job.article_html[:500] + "..."
             if job.article_html and len(job.article_html) > 500
@@ -207,6 +209,7 @@ def _schedule_retry_for_failed_step(
     req: RetryJobRequest,
 ) -> StepName:
     step_name = failed_step.step
+    ai_cfg = cfg.get_ai_provider_config(req.ai_provider)
 
     if step_name == StepName.DOWNLOAD:
         if not job.share_text:
@@ -231,10 +234,12 @@ def _schedule_retry_for_failed_step(
             _require_api_key(req.api_key),
             "",
             "",
-            "",
-            cfg.siliconflow_default_temperature,
+            req.text_model or ai_cfg["default_text_model"],
+            ai_cfg["default_temperature"],
             job.generate_inline_images,
             True,
+            ai_cfg["base_url"],
+            ai_cfg["max_tokens"],
         )
     elif step_name == StepName.GENERATE_IMAGE:
         background_tasks.add_task(
@@ -243,10 +248,11 @@ def _schedule_retry_for_failed_step(
             _require_api_key(req.api_key),
             req.wechat_appid,
             req.wechat_appsecret,
-            "",
-            "",
+            req.image_model or ai_cfg["default_image_model"],
+            ai_cfg["default_image_size"],
             job.generate_inline_images,
             True,
+            ai_cfg["base_url"],
         )
     elif step_name == StepName.CONVERT_HTML:
         background_tasks.add_task(_run_convert_html, job.job_id, True)
@@ -395,6 +401,7 @@ def _schedule_resume_for_remaining_steps(
         return None  # 所有步骤已完成
 
     first = remaining[0]
+    ai_cfg = cfg.get_ai_provider_config(req.ai_provider)
 
     if first == StepName.DOWNLOAD:
         if not job.share_text:
@@ -418,9 +425,12 @@ def _schedule_resume_for_remaining_steps(
             _require_api_key(req.api_key),
             "",
             "",
-            "",
-            cfg.siliconflow_default_temperature,
+            req.text_model or ai_cfg["default_text_model"],
+            ai_cfg["default_temperature"],
             job.generate_inline_images,
+            False,
+            ai_cfg["base_url"],
+            ai_cfg["max_tokens"],
         )
     elif first == StepName.GENERATE_IMAGE:
         background_tasks.add_task(
@@ -429,9 +439,11 @@ def _schedule_resume_for_remaining_steps(
             _require_api_key(req.api_key),
             req.wechat_appid,
             req.wechat_appsecret,
-            "",
-            "",
+            req.image_model or ai_cfg["default_image_model"],
+            ai_cfg["default_image_size"],
             job.generate_inline_images,
+            False,
+            ai_cfg["base_url"],
         )
     elif first == StepName.CONVERT_HTML:
         background_tasks.add_task(_run_convert_html, job.job_id)
@@ -868,30 +880,51 @@ async def step_generate_article(req: GenerateArticleRequest, background_tasks: B
     job = _get_job_or_404(req.job_id)
     if not job.transcript_path:
         raise HTTPException(status_code=400, detail="请先完成 Step3（语音转写）")
-    
+
     failed_step = any(
         s.step == StepName.GENERATE_ARTICLE and s.status == JobStatus.FAILED
         for s in job.steps
     )
     if not failed_step and job.status == JobStatus.FAILED:
         raise HTTPException(status_code=400, detail="当前 Job 有其他步骤失败，请先重试失败的步骤")
-    
+
     if failed_step:
         clear_pause_signal(req.job_id)
         job.status = JobStatus.RUNNING
         job.error = None
         pipeline_store.save(job)
+    ai_cfg = cfg.get_ai_provider_config(req.ai_provider)
     background_tasks.add_task(
         _run_generate_article,
         req.job_id, req.api_key, req.topic,
-        req.extra_requirements, req.text_model, req.temperature,
+        req.extra_requirements,
+        req.text_model or ai_cfg["default_text_model"],
+        req.temperature,
         req.generate_inline_images, retry=failed_step,
+        base_url=ai_cfg["base_url"],
+        max_tokens=ai_cfg["max_tokens"],
+        rag_collection=req.rag_collection,
+        rag_top_k=req.rag_top_k,
+        rag_embedding_model=req.rag_embedding_model,
+        rag_embedding_provider=req.rag_embedding_provider,
     )
     return GenerateArticleResponse(success=True, message="文章生成任务已提交" + ("（重试）" if failed_step else ""), job_id=req.job_id)
 
 
-def _run_generate_article(job_id, api_key, topic, extra_requirements, text_model, temperature, generate_inline_images=True, retry: bool = False):
+def _run_generate_article(job_id, api_key, topic, extra_requirements, text_model, temperature, generate_inline_images=True, retry: bool = False, base_url: str | None = None, max_tokens: int | None = None, rag_collection: str = "", rag_top_k: int = 5, rag_embedding_model: str = "", rag_embedding_provider: str = ""):
     from app.services.article_service import generate_article
+
+    # ── 打印配置信息，方便调试 ──────────────────────────────────────────────
+    masked_key = (api_key[:6] + "****" + api_key[-4:]) if api_key and len(api_key) > 10 else "（空）"
+    print(f"\n{'='*60}")
+    print(f"[Step4-文章] 配置信息 | job_id={job_id}")
+    print(f"  base_url  = {base_url}")
+    print(f"  api_key   = {masked_key}")
+    print(f"  model     = {text_model}")
+    print(f"  temp      = {temperature}")
+    print(f"  max_tokens= {max_tokens}")
+    print(f"  retry     = {retry}")
+    print(f"{'='*60}\n")
 
     job = _check_job_alive(job_id)
     if not job:
@@ -909,10 +942,17 @@ def _run_generate_article(job_id, api_key, topic, extra_requirements, text_model
             model_name=text_model or None,
             temperature=temperature,
             generate_inline_images=generate_inline_images,
+            base_url=base_url,
+            max_tokens=max_tokens,
+            rag_collection=rag_collection or None,
+            rag_top_k=rag_top_k,
+            rag_embedding_model=rag_embedding_model or None,
+            rag_embedding_provider=rag_embedding_provider or None,
         )
 
         job.article_title = article_data["title"]
-        job.article_body_html = article_data["content"]
+        job.article_body_markdown = article_data["content"]
+        job.article_body_html = article_data["content"]  # 临时存储，后续步骤会转换为 HTML
         job.article_image_prompts = article_data["image_prompts"]
         # 把开关存入 job，Step5/6 需要读取
         job.generate_inline_images = generate_inline_images
@@ -939,30 +979,45 @@ async def step_generate_image(req: GenerateImageRequest, background_tasks: Backg
     job = _get_job_or_404(req.job_id)
     if not job.article_image_prompts:
         raise HTTPException(status_code=400, detail="请先完成 Step4（生成文章）")
-    
+
     failed_step = any(
         s.step == StepName.GENERATE_IMAGE and s.status == JobStatus.FAILED
         for s in job.steps
     )
     if not failed_step and job.status == JobStatus.FAILED:
         raise HTTPException(status_code=400, detail="当前 Job 有其他步骤失败，请先重试失败的步骤")
-    
+
     if failed_step:
         clear_pause_signal(req.job_id)
         job.status = JobStatus.RUNNING
         job.error = None
         pipeline_store.save(job)
+    ai_cfg = cfg.get_ai_provider_config(req.ai_provider)
     background_tasks.add_task(
         _run_generate_image,
         req.job_id, req.api_key, req.wechat_appid, req.wechat_appsecret,
-        req.image_model, req.image_size, req.generate_inline_images, retry=failed_step,
+        req.image_model or ai_cfg["default_image_model"],
+        req.image_size or ai_cfg["default_image_size"],
+        req.generate_inline_images, retry=failed_step,
+        base_url=ai_cfg["base_url"],
     )
     return GenerateImageResponse(success=True, message="配图生成任务已提交" + ("（重试）" if failed_step else ""), job_id=req.job_id)
 
 
-def _run_generate_image(job_id, api_key, wechat_appid, wechat_appsecret, image_model, image_size, generate_inline_images=True, retry: bool = False):
+def _run_generate_image(job_id, api_key, wechat_appid, wechat_appsecret, image_model, image_size, generate_inline_images=True, retry: bool = False, base_url: str | None = None):
     from app.services.image_service import generate_images_concurrent, upload_images_to_wechat_concurrent
     from app.services.wechat_service import get_access_token
+
+    # ── 打印配置信息，方便调试 ──────────────────────────────────────────────
+    masked_key = (api_key[:6] + "****" + api_key[-4:]) if api_key and len(api_key) > 10 else "（空）"
+    print(f"\n{'='*60}")
+    print(f"[Step5-配图] 配置信息 | job_id={job_id}")
+    print(f"  base_url  = {base_url}")
+    print(f"  api_key   = {masked_key}")
+    print(f"  model     = {image_model}")
+    print(f"  size      = {image_size}")
+    print(f"  retry     = {retry}")
+    print(f"{'='*60}\n")
 
     job = _check_job_alive(job_id)
     if not job:
@@ -994,6 +1049,7 @@ def _run_generate_image(job_id, api_key, wechat_appid, wechat_appsecret, image_m
             output_dir=cfg.outputs_dir,
             model_name=image_model or None,
             image_size=image_size or None,
+            base_url=base_url,
         )
 
         # ── 3. 封面图：优先 id=cover，兜底取 local_map 第一张 ────────────────
@@ -1063,22 +1119,23 @@ async def step_convert_html(req: ConvertHtmlRequest, background_tasks: Backgroun
 
 def _run_convert_html(job_id: str, retry: bool = False):
     from app.services.wechat_service import replace_image_placeholders
-    from app.services.html_service import sanitize_wechat_html
+    from app.services.html_service import convert_to_wechat_html
 
     job = _check_job_alive(job_id)
     if not job:
         return
     result = _begin_step(job, StepName.CONVERT_HTML, retry=retry)
     try:
-        html = job.article_body_html
+        # 使用 Markdown 转换为 HTML
+        html = convert_to_wechat_html(job.article_body_markdown, is_markdown=True)
 
         # ── 1. 替换占位符（仅文中插图开启时才替换）──────────────────────────
-        # generate_inline_images=False 时 article_body_html 已无占位符，直接清洗即可
+        # generate_inline_images=False 时 article_body_markdown 已无占位符，直接清洗即可
         if job.generate_inline_images and job.wechat_image_map:
             html = replace_image_placeholders(html, job.wechat_image_map)
 
         # ── 2. 微信白名单 HTML 清洗 ───────────────────────────────────────────
-        wechat_html = sanitize_wechat_html(html)
+        wechat_html = html  # 已经是微信兼容的 HTML
 
         # ── 3. 保存到文件 ──────────────────────────────────────────────────────
         output_path = (cfg.outputs_dir / f"{job_id}_wechat.html").resolve()

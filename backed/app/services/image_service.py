@@ -45,13 +45,13 @@ async def _async_generate_one(
     model_name: str,
     image_size: str,
     semaphore: asyncio.Semaphore,
+    base_url: str,
 ) -> tuple[str, Path]:
     """
     生成单张图片并下载到本地。
     返回 (img_id, local_path)
     """
     httpx = _ensure_httpx()
-    cfg = get_settings()
 
     img_id: str = prompt_item["id"]
     prompt: str = prompt_item["prompt"]
@@ -63,7 +63,7 @@ async def _async_generate_one(
         def _call_image_api():
             openai_mod = _ensure_openai()
             from openai import OpenAI
-            client = OpenAI(api_key=api_key, base_url=cfg.siliconflow_base_url)
+            client = OpenAI(api_key=api_key, base_url=base_url)
             resp = client.images.generate(
                 model=model_name,
                 prompt=prompt,
@@ -146,21 +146,27 @@ def generate_images_concurrent(
     model_name: str | None = None,
     image_size: str | None = None,
     max_concurrent: int = 3,
+    base_url: str | None = None,
 ) -> dict[str, Path]:
     """
     并发生成所有图片并下载到本地。
     返回 {img_id: local_path}
+
+    base_url：AI 服务端点，留空默认使用 SiliconFlow。
+              传入智谱端点 https://open.bigmodel.cn/api/paas/v4 即可切换到智谱。
     """
     cfg = get_settings()
     if model_name is None:
         model_name = cfg.siliconflow_default_image_model
     if image_size is None:
         image_size = cfg.siliconflow_default_image_size
+    if base_url is None:
+        base_url = cfg.siliconflow_base_url
 
     async def _run():
         semaphore = asyncio.Semaphore(max_concurrent)
         tasks = [
-            _async_generate_one(item, api_key, output_dir, model_name, image_size, semaphore)
+            _async_generate_one(item, api_key, output_dir, model_name, image_size, semaphore, base_url)
             for item in image_prompts
         ]
         results = await asyncio.gather(*tasks)

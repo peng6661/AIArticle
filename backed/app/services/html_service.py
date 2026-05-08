@@ -146,12 +146,159 @@ def _parse_style_rules(style_blocks: Iterable[str]) -> dict[str, str]:
 
 
 def _markdown_to_html(markdown_text: str) -> str:
+    """将 Markdown 转换为 HTML，支持表格、代码块、列表等扩展"""
     md = _ensure_markdown()
     return md.markdown(
         markdown_text,
-        extensions=["extra", "sane_lists"],
+        extensions=[
+            "fenced_code",
+            "tables",
+            "sane_lists",
+            "nl2br",
+        ],
         output_format="html5",
     )
+
+
+def _fix_cjk_spacing(text: str) -> str:
+    """在中文和英文/数字之间自动插入空格，提升微信阅读体验"""
+    cjk = r'[\u4e00-\u9fff\u3400-\u4dbf\u3000-\u303f\uff00-\uffef]'
+    latin = r'[A-Za-z0-9]'
+    text = re.sub(f'({cjk})({latin})', r'\1 \2', text)
+    text = re.sub(f'({latin})({cjk})', r'\1 \2', text)
+    return text
+
+
+def _fix_cjk_bold_punctuation(html: str) -> str:
+    """将中文标点移到加粗标签外部，修复微信渲染间距问题"""
+    pattern = r'(<strong>)(.*?)([，。！？；：、]+)(</strong>)'
+    return re.sub(pattern, r'\1\2\4\3', html)
+
+
+def _convert_lists_to_sections(html: str) -> str:
+    """将 ul/ol 转为 section 布局，解决微信原生列表渲染不稳定的问题"""
+    bs4 = _ensure_bs4()
+    BeautifulSoup = bs4.BeautifulSoup
+
+    soup = BeautifulSoup(html, "html.parser")
+    text_color = "#333333"
+    primary_color = "#d94e28"
+
+    for ul in soup.find_all("ul"):
+        section = soup.new_tag("section")
+        for li in ul.find_all("li", recursive=False):
+            item = soup.new_tag("section", style=f"display: flex; align-items: flex-start; margin-bottom: 8px; color: {text_color}")
+            bullet = soup.new_tag("span", style=f"color: {primary_color}; margin-right: 8px; flex-shrink: 0; font-size: 18px; line-height: 1.6")
+            bullet.string = "\u2022"
+            content = soup.new_tag("span", style="flex: 1")
+            for child in list(li.children):
+                content.append(child.extract() if hasattr(child, 'extract') else child)
+            item.append(bullet)
+            item.append(content)
+            section.append(item)
+        ul.replace_with(section)
+
+    for idx, ol in enumerate(soup.find_all("ol")):
+        section = soup.new_tag("section")
+        for num, li in enumerate(ol.find_all("li", recursive=False), 1):
+            item = soup.new_tag("section", style=f"display: flex; align-items: flex-start; margin-bottom: 8px; color: {text_color}")
+            number = soup.new_tag("span", style=f"color: {primary_color}; margin-right: 8px; flex-shrink: 0; font-weight: 700; line-height: 1.8")
+            number.string = f"{num}."
+            content = soup.new_tag("span", style="flex: 1")
+            for child in list(li.children):
+                content.append(child.extract() if hasattr(child, 'extract') else child)
+            item.append(number)
+            item.append(content)
+            section.append(item)
+        ol.replace_with(section)
+
+    return str(soup)
+
+
+def _apply_wechat_article_layout(html: str) -> str:
+    """为微信公众号正文补齐稳定的标题层级和书卷风格版式。"""
+    bs4 = _ensure_bs4()
+    BeautifulSoup = bs4.BeautifulSoup
+
+    soup = BeautifulSoup(html, "html.parser")
+    wrapper = soup.new_tag(
+        "section",
+        style=(
+            "background: #f7f0df; color: #3f3426; padding: 28px 24px; "
+            "border-radius: 10px; line-height: 1.9; font-size: 16px; "
+            "word-break: break-word;"
+        ),
+    )
+
+    for child in list(soup.contents):
+        wrapper.append(child.extract())
+
+    for h1 in wrapper.find_all("h1"):
+        h1["style"] = _merge_style_text(
+            h1.get("style", ""),
+            (
+                "margin: 0 0 22px; padding-bottom: 12px; text-align: center; "
+                "font-size: 28px; line-height: 1.4; font-weight: 700; "
+                "color: #5c4021; border-bottom: 1px solid #d8c29b"
+            ),
+        )
+
+    for h2 in wrapper.find_all("h2"):
+        h2["style"] = _merge_style_text(
+            h2.get("style", ""),
+            (
+                "margin: 30px 0 14px; padding: 10px 14px; "
+                "background: #efe2c2; color: #6b4528; font-size: 22px; "
+                "line-height: 1.5; font-weight: 700; border-left: 4px solid #b77b43; "
+                "border-radius: 6px"
+            ),
+        )
+
+    for h3 in wrapper.find_all("h3"):
+        h3["style"] = _merge_style_text(
+            h3.get("style", ""),
+            (
+                "margin: 22px 0 10px; color: #8a5a2f; font-size: 18px; "
+                "line-height: 1.6; font-weight: 700"
+            ),
+        )
+
+    for p in wrapper.find_all("p"):
+        p["style"] = _merge_style_text(
+            p.get("style", ""),
+            "margin: 0 0 14px; text-indent: 2em; color: #3f3426; line-height: 1.9",
+        )
+
+    for blockquote in wrapper.find_all("blockquote"):
+        blockquote["style"] = _merge_style_text(
+            blockquote.get("style", ""),
+            (
+                "margin: 18px 0; padding: 12px 16px; background: #f1e6cf; "
+                "border-left: 4px solid #c19057; color: #6b5338"
+            ),
+        )
+
+    for pre in wrapper.find_all("pre"):
+        pre["style"] = _merge_style_text(
+            pre.get("style", ""),
+            (
+                "margin: 18px 0; padding: 14px 16px; background: #eadfc9; "
+                "border-radius: 8px; white-space: pre-wrap"
+            ),
+        )
+
+    for img in wrapper.find_all("img"):
+        img["style"] = _merge_style_text(
+            img.get("style", ""),
+            (
+                "max-width: 100%; height: auto; display: block; margin: 18px auto; "
+                "border-radius: 8px"
+            ),
+        )
+
+    result = BeautifulSoup("", "html.parser")
+    result.append(wrapper)
+    return str(result)
 
 
 def sanitize_wechat_html(html_text: str) -> str:
@@ -238,7 +385,12 @@ def convert_to_wechat_html(input_text: str, is_markdown: bool = False) -> str:
     """将文本（HTML 或 Markdown）转换为微信公众号格式 HTML"""
     if is_markdown:
         input_text = _markdown_to_html(input_text)
-    return sanitize_wechat_html(input_text)
+    html = sanitize_wechat_html(input_text)
+    # 微信排版后处理
+    html = _fix_cjk_bold_punctuation(html)
+    html = _convert_lists_to_sections(html)
+    html = _apply_wechat_article_layout(html)
+    return html
 
 
 def convert_file_to_wechat_html(input_path: Path, output_path: Path) -> str:

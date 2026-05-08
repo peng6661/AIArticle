@@ -3,6 +3,15 @@ YouTube视频解析服务
 
 重要：YouTube 视频的 CDN 直链有时效性（几秒~几分钟），不能像其他平台那样
 先提取直链再用 requests 下载。必须用 yt-dlp 自身的下载功能直接保存到本地。
+
+【新版 yt-dlp (2026+) 说明】
+yt-dlp 新版需要 JavaScript Runtime（node/deno/bun）来生成 PO Token，
+否则 YouTube 会以机器人验证拦截请求。
+同时 cookies 是必须的（YouTube 要求登录验证）。
+建议：
+1. 用浏览器扩展（如 "Get cookies.txt LOCALLY"）导出 cookies 文件
+2. 放到 backed/cookies_youtube.txt
+3. 在 config.yaml 中配置 youtube.cookies_source: file
 """
 import yt_dlp
 import asyncio
@@ -11,10 +20,168 @@ import queue
 import shutil
 import re
 import tempfile
+import http.cookiejar
 from pathlib import Path
 from typing import Optional, AsyncIterator, Dict, Any
 from dataclasses import dataclass, field
 from app.services.base import BaseExtractor
+from app.core.config import get_settings
+
+# 后端目录（backed/），用于解析相对路径的 cookies 文件
+_BACKED_DIR = Path(__file__).parent.parent.parent
+
+
+def _get_js_runtime_opts() -> dict:
+    """
+    自动检测并配置 yt-dlp 的 JavaScript Runtime。
+    新版 yt-dlp 需要 JS Runtime 来生成 PO Token，否则 YouTube 会返回机器人验证错误。
+    支持：node / deno / bun / quickjs
+    """
+    settings = get_settings()
+    js_runtime_cfg = settings.youtube_js_runtime  # "auto" / "node:/path/to/node" / "" / "none"
+
+    if not js_runtime_cfg or js_runtime_cfg.lower() == "none":
+        return {}
+
+    if js_runtime_cfg.lower() == "auto":
+        # 自动查找：依次检测 node / deno / bun
+        for runtime_name in ("node", "deno", "bun"):
+            runtime_path = shutil.which(runtime_name)
+            if runtime_path:
+                print(f"[YouTube] 自动检测到 JS Runtime: {runtime_name} -> {runtime_path}")
+                return {"js_runtimes": {runtime_name: {"path": runtime_path}}}
+        print("[YouTube] 警告: 未找到 JS Runtime（node/deno/bun），YouTube 解析可能受限")
+        return {}
+
+    # 手动配置，格式：<runtime_name> 或 <runtime_name>:<path>
+    if ":" in js_runtime_cfg:
+        parts = js_runtime_cfg.split(":", 1)
+        runtime_name = parts[0].strip()
+        runtime_path = parts[1].strip()
+    else:
+        runtime_name = js_runtime_cfg.strip()
+        runtime_path = shutil.which(runtime_name) or ""
+
+    if runtime_path:
+        print(f"[YouTube] 使用 JS Runtime: {runtime_name} -> {runtime_path}")
+        return {"js_runtimes": {runtime_name: {"path": runtime_path}}}
+    else:
+        print(f"[YouTube] 警告: 配置的 JS Runtime '{runtime_name}' 未找到")
+        return {}
+
+
+def _get_chrome_cookies_via_browser_cookie3() -> Optional[http.cookiejar.CookieJar]:
+    """
+    使用 browser_cookie3 库直接读取 Chrome 的 cookies。
+    绕过 yt-dlp 的 DPAPI 解密问题（仅在 browser_cookie3 安装时可用）。
+    """
+    try:
+        import browser_cookie3
+        cj = browser_cookie3.chrome(domain_name=".youtube.com")
+        print(f"[YouTube] 成功通过 browser_cookie3 读取 Chrome cookies")
+        return cj
+    except ImportError:
+        print(f"[YouTube] browser_cookie3 未安装")
+        return None
+    except Exception as e:
+        print(f"[YouTube] browser_cookie3 读取 Chrome cookies 失败: {e}")
+        return None
+
+
+def _get_youtube_cookies_opts() -> dict:
+    """
+    根据配置返回 yt-dlp 的 cookies 相关选项。
+
+    支持三种模式：
+    1. file  - 从 Netscape 格式的 cookies.txt 文件读取（推荐）
+    2. browser + chrome - 先尝试 browser_cookie3 直接读取（绕过 DPAPI），失败则回退 yt-dlp 内置方式
+    3. browser + 其他  - 使用 yt-dlp 内置的 cookiesfrombrowser
+    4. none  - 不使用 cookies（部分公开视频可能可以，但大多数会被拦截）
+    """
+    settings = get_settings()
+    cookies_opts = {}
+
+    cookies_source = settings.youtube_cookies_source
+
+    if cookies_source == "none":
+        print("[YouTube] cookies_source=none，不使用 cookies（仅适用于完全公开视频）")
+        return {}
+
+    elif cookies_source == "file":
+        cookies_file = settings.youtube_cookies_file
+        if cookies_file:
+            # 支持相对路径（相对于 backed/ 目录）
+            cookies_path = Path(cookies_file)
+            if not cookies_path.is_absolute():
+                cookies_path = _BACKED_DIR / cookies_file
+            if cookies_path.exists():
+                cookies_opts["cookiefile"] = str(cookies_path)
+                print(f"[YouTube] 使用 cookies 文件: {cookies_path}")
+            else:
+                print(f"[YouTube] 警告: cookies 文件不存在: {cookies_path}")
+                print(f"[YouTube] 请参考说明导出 cookies 文件到: {cookies_path}")
+        else:
+            print("[YouTube] 警告: cookies_source=file 但未配置 cookies_file 路径")
+
+    elif cookies_source == "browser":
+        browser = settings.youtube_browser
+
+        if browser == "chrome":
+            # Chrome 在 Windows 上有 DPAPI/App-Bound Encryption 问题，先尝试 browser_cookie3
+            cj = _get_chrome_cookies_via_browser_cookie3()
+            if cj:
+                cookies_opts["cookiejar"] = cj
+            else:
+                print("[YouTube] 警告: 无法读取 Chrome cookies（DPAPI/App-Bound Encryption 限制）")
+                print("[YouTube] 建议改用 cookies 文件方式，参考 README 导出 cookies.txt")
+                cookies_opts["cookiesfrombrowser"] = (browser,)
+        else:
+            # 其他浏览器（edge/firefox等）使用 yt-dlp 内置方式
+            cookies_opts["cookiesfrombrowser"] = (browser,)
+            print(f"[YouTube] 使用浏览器 cookies: {browser}")
+
+    return cookies_opts
+
+
+def _get_remote_components_opts() -> dict:
+    """
+    配置 yt-dlp 远程组件，用于生成 PO Token（新版 YouTube 必须）。
+    参考：https://github.com/yt-dlp/yt-dlp/wiki/EJS
+    ejs:github 从 GitHub 下载挑战脚本，ejs:npm 从 npm 下载。
+    """
+    settings = get_settings()
+    # 可通过 config.yaml 的 youtube.remote_components 控制，默认启用 github
+    rc = getattr(settings, 'youtube_remote_components', 'github')
+    if not rc or rc.lower() == 'none':
+        return {}
+    # rc 可以是 "github" / "npm" / "github,npm"
+    components = set()
+    for c in rc.split(','):
+        c = c.strip()
+        if c:
+            components.add(f"ejs:{c}")
+    if components:
+        print(f"[YouTube] 启用远程组件: {components}")
+        return {"remote_components": components}
+    return {}
+
+
+def _build_ydl_opts(extra: dict = None) -> dict:
+    """
+    构建通用的 yt-dlp 选项，合并 cookies + JS Runtime + 远程组件配置。
+    """
+    opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "nocheckcertificate": True,
+        **_get_youtube_cookies_opts(),
+        **_get_js_runtime_opts(),
+        **_get_remote_components_opts(),
+    }
+    if extra:
+        # 允许 extra 覆盖（例如测试时传 quiet=False）
+        opts.update(extra)
+    return opts
 
 
 @dataclass
@@ -66,12 +233,7 @@ class YouTubeExtractor(BaseExtractor):
 
     def extract(self, url: str) -> Optional[dict]:
         """从YouTube URL提取视频信息（仅获取元数据，不下载）"""
-        opts = {
-            "quiet": True,
-            "no_warnings": True,
-            "skip_download": True,
-            "nocheckcertificate": True,
-        }
+        opts = _build_ydl_opts({"skip_download": True})
 
         try:
             with yt_dlp.YoutubeDL(opts) as ydl:
@@ -113,13 +275,10 @@ class YouTubeExtractor(BaseExtractor):
         获取视频元数据（包括文件大小），不下载。
         用于在开始流式下载前预先获取总大小，以便前端设置 Content-Length。
         """
-        opts = {
-            "quiet": True,
-            "no_warnings": True,
+        opts = _build_ydl_opts({
             "skip_download": True,
-            "nocheckcertificate": True,
             "format": "best[ext=mp4]/best",
-        }
+        })
 
         try:
             with yt_dlp.YoutubeDL(opts) as ydl:
@@ -164,13 +323,10 @@ class YouTubeExtractor(BaseExtractor):
         safe_title = re.sub(r'[\\/:*?"<>|]', '_', media_data.get("title", "YouTube_video"))[:80]
         output_template = str(output_dir / f"{safe_title}.%(ext)s")
 
-        opts = {
-            "quiet": True,
-            "no_warnings": True,
-            "nocheckcertificate": True,
+        opts = _build_ydl_opts({
             "format": "best[ext=mp4]/best",
             "outtmpl": output_template,
-        }
+        })
 
         try:
             with yt_dlp.YoutubeDL(opts) as ydl:
@@ -263,14 +419,11 @@ class YouTubeExtractor(BaseExtractor):
             # （yt-dlp 会写入同路径的文件）
             ctx.file_path = str(Path(temp_dir) / f"{safe_title}.mp4")
             try:
-                opts = {
-                    "quiet": True,
-                    "no_warnings": True,
-                    "nocheckcertificate": True,
+                opts = _build_ydl_opts({
                     "format": "best[ext=mp4]/best",
                     "outtmpl": output_template,
                     "progress_hooks": [progress_hook],
-                }
+                })
                 
                 with yt_dlp.YoutubeDL(opts) as ydl:
                     info = ydl.extract_info(ctx.url, download=True)
