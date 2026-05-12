@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 from app.core.config import get_settings
@@ -20,13 +19,7 @@ def _ensure_ffmpeg() -> str:
         import imageio_ffmpeg
         return imageio_ffmpeg.get_ffmpeg_exe()
     except ImportError:
-        print("未找到 ffmpeg，正在自动安装 imageio-ffmpeg ...")
-        subprocess.run(
-            [sys.executable, "-m", "pip", "install", "imageio-ffmpeg"],
-            check=True,
-        )
-        import imageio_ffmpeg
-        return imageio_ffmpeg.get_ffmpeg_exe()
+        raise ImportError("未找到 ffmpeg，且 imageio-ffmpeg 未安装；请先执行 pip install -r requirements.txt")
 
 
 def _build_output_path(video_path: Path, audio_format: str) -> Path:

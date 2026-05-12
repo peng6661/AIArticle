@@ -138,7 +138,7 @@ def search_youtube_sync(keyword: str, limit: int = 10) -> list[VideoSearchResult
         "--playlist-items", f"1:{limit}",
         f"ytsearch{limit}:{keyword}",
     ]
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+    proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
     if proc.returncode != 0:
         raise ValueError(f"yt-dlp 搜索失败: {proc.stderr[:200]}")
 
@@ -382,7 +382,7 @@ def search_tiktok_sync(keyword: str, limit: int = 10) -> list[VideoSearchResult]
         "--playlist-items", f"1:{limit}",
         search_url,
     ]
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+    proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
     if proc.returncode != 0:
         raise ValueError(f"TikTok 搜索失败: {proc.stderr[:200]}")
 
@@ -423,150 +423,6 @@ def search_tiktok_sync(keyword: str, limit: int = 10) -> list[VideoSearchResult]
     return results[:limit]
 
 
-# ── 快手搜索 ─────────────────────────────────────────────────────────────────
-
-def search_kuaishou_sync(keyword: str, limit: int = 10) -> list[VideoSearchResult]:
-    """通过快手 GraphQL API 搜索视频"""
-    session = _build_session()
-    resp = session.post(
-        "https://www.kuaishou.com/graphql",
-        json={
-            "operationName": "visionSearchPhoto",
-            "variables": {
-                "keyword": keyword,
-                "pcursor": "",
-                "page": "search",
-                "searchSessionId": "",
-            },
-            "query": """
-            query visionSearchPhoto($keyword: String, $pcursor: String, $page: String, $searchSessionId: String) {
-                visionSearchPhoto(keyword: $keyword, pcursor: $pcursor, page: $page, searchSessionId: $searchSessionId) {
-                    result
-                    llsid
-                    webPageArea
-                    feeds {
-                        type
-                        photo {
-                            id
-                            caption
-                            coverUrl
-                            photoUrl
-                            duration
-                            viewCount
-                            likeCount
-                            commentCount
-                            timestamp
-                            author {
-                                name
-                            }
-                        }
-                    }
-                }
-            }
-            """,
-        },
-        headers={
-            "Accept": "application/json",
-            "Referer": "https://www.kuaishou.com/",
-            "Origin": "https://www.kuaishou.com",
-            "Content-Type": "application/json",
-        },
-        timeout=15,
-    )
-    resp.raise_for_status()
-    data = resp.json()
-    feeds = data.get("data", {}).get("visionSearchPhoto", {}).get("feeds", [])
-
-    results = []
-    for feed in feeds:
-        photo = feed.get("photo", {})
-        if not photo:
-            continue
-        photo_id = photo.get("id", "")
-        caption = photo.get("caption", "")
-        cover_url = photo.get("coverUrl", "")
-        view_count = photo.get("viewCount", 0)
-        like_count = photo.get("likeCount", 0)
-        comment_count = photo.get("commentCount", 0)
-        duration = photo.get("duration", 0)
-        author_info = photo.get("author", {})
-        author = author_info.get("name", "")
-        url = f"https://www.kuaishou.com/short-video/{photo_id}" if photo_id else ""
-        timestamp = photo.get("timestamp", 0)
-        publish_time = ""
-        if timestamp:
-            from datetime import datetime
-            try:
-                publish_time = datetime.fromtimestamp(timestamp / 1000).strftime("%Y-%m-%d")
-            except (ValueError, OSError):
-                pass
-
-        results.append(VideoSearchResult(
-            title=caption,
-            url=url,
-            cover_url=cover_url,
-            platform="kuaishou",
-            author=author,
-            play_count=view_count,
-            like_count=like_count,
-            comment_count=comment_count,
-            duration=int(duration / 1000) if duration > 1000 else duration,
-            publish_time=publish_time,
-            heat_score=_calc_heat_score(view_count, like_count, comment_count),
-            description=caption[:200],
-        ))
-    return results[:limit]
-
-
-# ── Instagram 搜索（yt-dlp）──────────────────────────────────────────────────
-
-def search_instagram_sync(keyword: str, limit: int = 10) -> list[VideoSearchResult]:
-    """通过 yt-dlp 搜索 Instagram Reels（按关键词标签）"""
-    tag = keyword.replace(" ", "").replace("#", "")
-    search_url = f"https://www.instagram.com/explore/tags/{tag}/"
-    cmd = [
-        "yt-dlp", "--flat-playlist", "--dump-json",
-        "--playlist-items", f"1:{limit}",
-        search_url,
-    ]
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-    if proc.returncode != 0:
-        raise ValueError(f"Instagram 搜索失败: {proc.stderr[:200]}")
-
-    results = []
-    for line in proc.stdout.strip().split("\n"):
-        if not line.strip():
-            continue
-        try:
-            item = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-
-        url = item.get("url") or item.get("webpage_url") or ""
-        title = item.get("title") or item.get("description", "")
-        thumbnail = item.get("thumbnail") or ""
-        view_count = item.get("view_count") or 0
-        like_count = item.get("like_count") or 0
-        comment_count = item.get("comment_count") or 0
-        duration = int(item.get("duration") or 0)
-        uploader = item.get("uploader") or ""
-
-        results.append(VideoSearchResult(
-            title=title,
-            url=url,
-            cover_url=thumbnail,
-            platform="instagram",
-            author=uploader,
-            play_count=view_count,
-            like_count=like_count,
-            comment_count=comment_count,
-            duration=duration,
-            heat_score=_calc_heat_score(view_count, like_count, comment_count),
-            description=title[:200],
-        ))
-    return results[:limit]
-
-
 # ── X (Twitter) 搜索（yt-dlp）───────────────────────────────────────────────
 
 def search_x_sync(keyword: str, limit: int = 10) -> list[VideoSearchResult]:
@@ -577,7 +433,7 @@ def search_x_sync(keyword: str, limit: int = 10) -> list[VideoSearchResult]:
         "--playlist-items", f"1:{limit}",
         search_url,
     ]
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+    proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
     if proc.returncode != 0:
         raise ValueError(f"X 搜索失败: {proc.stderr[:200]}")
 
@@ -622,8 +478,6 @@ def search_x_sync(keyword: str, limit: int = 10) -> list[VideoSearchResult]:
 PLATFORM_FETCHERS: dict[str, tuple[str, callable]] = {
     "bilibili":  ("B站",     search_bilibili_sync),
     "youtube":   ("YouTube", search_youtube_sync),
-    "kuaishou":  ("快手",    search_kuaishou_sync),
-    "instagram": ("Instagram", search_instagram_sync),
 }
 
 ALL_PLATFORMS = list(PLATFORM_FETCHERS.keys())

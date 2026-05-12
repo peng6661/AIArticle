@@ -3,7 +3,6 @@
 import { Flame, Loader2, RefreshCw, Sparkles, TrendingUp } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 const PANEL_HEIGHT = 640;
 const HANDLE_SIZE = 52;
 const CHAIN_DROOP = 28;
@@ -105,7 +104,7 @@ export default function HotSearchShelf() {
     try {
       setLoading(true);
       setError("");
-      const url = new URL("/api/hot/boards", API_BASE);
+      const url = new URL("/api/hot/boards", window.location.origin);
       if (forceRefresh) url.searchParams.set("force_refresh", "true");
       const resp = await fetch(url.toString(), { cache: "no-store" });
       if (!resp.ok) throw new Error(`请求失败 (${resp.status})`);

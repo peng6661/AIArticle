@@ -1,6 +1,7 @@
 # IDE
 .idea/
 .vscode/
+.atomcode/
 
 # WorkBuddy
 .workbuddy/
@@ -43,6 +44,13 @@ backed/config.yaml
 *.log
 logs/
 
+# Local caches / generated runtime data
+.rag_cache/
+backed/.rag_cache/
+outputs/
+backed/outputs/
+*.pkl
+
 # OS
 .DS_Store
 Thumbs.db
@@ -62,8 +70,11 @@ coverage/
 # Downloaded media (large files)
 downloads/
 output/
+outputs/
+transcripts/
 temp/
 tmp/
+temp_downloads/
 
 # YouTube cookies (contains authentication tokens - never commit)
 backed/cookies_youtube.txt

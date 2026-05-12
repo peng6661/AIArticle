@@ -37,11 +37,12 @@ export const STEP_ORDER: string[] = [
   StepName.PUBLISH_DRAFT,
 ];
 
-export function getVisibleStepOrder(job: Pick<JobStatusResponse, "skip_publish">): string[] {
-  if (job.skip_publish) {
-    return STEP_ORDER.filter((step) => step !== StepName.PUBLISH_DRAFT);
+export function getVisibleStepOrder(job: Pick<JobStatusResponse, "skip_image_generation">): string[] {
+  let steps = STEP_ORDER;
+  if (job.skip_image_generation) {
+    steps = steps.filter((step) => step !== StepName.GENERATE_IMAGE);
   }
-  return STEP_ORDER;
+  return steps;
 }
 
 export interface StepResult {
@@ -58,7 +59,7 @@ export interface JobStatusResponse {
   status: JobStatus;
   current_step: string | null;
   steps: StepResult[];
-  skip_publish: boolean;
+  skip_image_generation: boolean;
   share_text: string | null;
   video_path: string | null;
   audio_path: string | null;
@@ -93,6 +94,8 @@ export interface FullPipelineRequest {
   topic?: string;
   extra_requirements?: string;
   text_model?: string;
+  image_provider?: string;
+  image_api_key?: string;
   image_model?: string;
   image_size?: string;
   audio_format?: string;
@@ -101,12 +104,12 @@ export interface FullPipelineRequest {
   author?: string;
   title?: string;
   original_notice?: string;
-  generate_inline_images?: boolean;
-  skip_publish?: boolean;
+  skip_image_generation?: boolean;
   rag_collection?: string;
   rag_top_k?: number;
   rag_embedding_model?: string;
   rag_embedding_provider?: string;
+  rag_embedding_api_key?: string;
 }
 
 export interface FullPipelineResponse {

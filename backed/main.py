@@ -50,7 +50,7 @@ def create_app() -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
-        allow_credentials=True,
+        allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],
     )
@@ -75,8 +75,6 @@ def create_app() -> FastAPI:
                 "POST /pipeline/step/download    → Step1: 下载视频（支持抖音/Instagram/B站/TikTok/快手/X/YouTube）",
                 "POST /pipeline/step/extract_audio → Step2: 提取音频",
                 "POST /pipeline/step/transcribe  → Step3: 语音转写",
-                "POST /pipeline/step/generate_article → Step4: AI 生成文章",
-                "POST /pipeline/step/generate_image → Step5: 并发生图 + 上传微信素材",
                 "POST /pipeline/step/convert_html → Step6: 微信 HTML 清洗",
                 "POST /pipeline/step/publish_draft → Step7: 发布微信草稿",
                 "GET  /pipeline/jobs/{job_id}    → 查询进度",

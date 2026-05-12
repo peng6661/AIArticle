@@ -10,10 +10,10 @@ from __future__ import annotations
 import asyncio
 import importlib
 import mimetypes
-import subprocess
-import sys
 import time
 from pathlib import Path
+
+from PIL import Image
 
 from app.core.config import get_settings
 
@@ -22,18 +22,29 @@ def _ensure_openai():
     try:
         return importlib.import_module("openai")
     except ImportError:
-        print("未检测到依赖 openai，正在自动安装...")
-        subprocess.run([sys.executable, "-m", "pip", "install", "openai"], check=True)
-        return importlib.import_module("openai")
+        raise ImportError("未检测到依赖 openai；请先执行 pip install -r requirements.txt")
 
 
 def _ensure_httpx():
     try:
         return importlib.import_module("httpx")
     except ImportError:
-        print("未检测到依赖 httpx，正在自动安装...")
-        subprocess.run([sys.executable, "-m", "pip", "install", "httpx"], check=True)
-        return importlib.import_module("httpx")
+        raise ImportError("未检测到依赖 httpx；请先执行 pip install -r requirements.txt")
+
+
+def _resize_image(local_path: Path, target_size: str):
+    """
+    将图片 resize 到目标尺寸（宽x高）。
+    target_size 格式: "900x383"
+    """
+    try:
+        width, height = map(int, target_size.split('x'))
+        with Image.open(local_path) as img:
+            img_resized = img.resize((width, height), Image.Resampling.LANCZOS)
+            img_resized.save(local_path)
+        print(f"[resize] 图片已缩放: {local_path.name} -> {target_size}")
+    except Exception as e:
+        print(f"[resize] 警告: 无法缩放图片 {local_path.name}: {e}")
 
 
 # ── 异步生图 + 下载单张图片 ───────────────────────────────────────────────────
@@ -46,10 +57,12 @@ async def _async_generate_one(
     image_size: str,
     semaphore: asyncio.Semaphore,
     base_url: str,
+    target_size: str | None = None,
 ) -> tuple[str, Path]:
     """
     生成单张图片并下载到本地。
     返回 (img_id, local_path)
+    target_size: 生成后统一 resize 的目标尺寸，格式 "900x383"，为 None 则不缩放。
     """
     httpx = _ensure_httpx()
 
@@ -64,20 +77,27 @@ async def _async_generate_one(
             openai_mod = _ensure_openai()
             from openai import OpenAI
             client = OpenAI(api_key=api_key, base_url=base_url)
+            print(f"[生图] 调用 API | model={model_name} | size={image_size} | prompt={prompt[:50]}...")
             resp = client.images.generate(
                 model=model_name,
                 prompt=prompt,
                 size=image_size,
                 n=1,
             )
+            print(f"[生图] 响应类型: {type(resp)} | 属性: {[a for a in dir(resp) if not a.startswith('_')]}")
             url = None
             if hasattr(resp, "data") and resp.data:
                 url = getattr(resp.data[0], "url", None)
+                print(f"[生图] 从 resp.data 获取 URL: {url}")
             if not url and hasattr(resp, "model_dump"):
                 data = resp.model_dump().get("data", [])
                 if data:
                     url = data[0].get("url")
+                    print(f"[生图] 从 model_dump 获取 URL: {url}")
             if not url:
+                # 打印完整响应以便调试
+                dump = resp.model_dump() if hasattr(resp, "model_dump") else {}
+                print(f"[生图] 完整响应: {dump}")
                 raise ValueError(f"[{img_id}] 生图接口未返回 URL，prompt: {prompt[:60]}")
             return url
 
@@ -93,6 +113,10 @@ async def _async_generate_one(
             r = await client_http.get(image_url)
             r.raise_for_status()
             local_path.write_bytes(r.content)
+
+        # ── 3. Resize 图片到目标尺寸 ──────────────────────────────────────
+        if target_size:
+            _resize_image(local_path, target_size)
 
         print(f"[+] 图片 {img_id} 已下载: {local_path}")
         return img_id, local_path
@@ -147,6 +171,7 @@ def generate_images_concurrent(
     image_size: str | None = None,
     max_concurrent: int = 3,
     base_url: str | None = None,
+    provider: str | None = None,
 ) -> dict[str, Path]:
     """
     并发生成所有图片并下载到本地。
@@ -154,6 +179,7 @@ def generate_images_concurrent(
 
     base_url：AI 服务端点，留空默认使用 SiliconFlow。
               传入智谱端点 https://open.bigmodel.cn/api/paas/v4 即可切换到智谱。
+    provider: "siliconflow" | "zhipu"，用于读取对应服务商的目标尺寸配置。
     """
     cfg = get_settings()
     if model_name is None:
@@ -162,11 +188,19 @@ def generate_images_concurrent(
         image_size = cfg.siliconflow_default_image_size
     if base_url is None:
         base_url = cfg.siliconflow_base_url
+    if provider is None:
+        provider = "siliconflow"
+
+    # 读取目标尺寸配置
+    if provider == "zhipu":
+        target_size = cfg.zhipu_target_image_size
+    else:
+        target_size = cfg.siliconflow_target_image_size
 
     async def _run():
         semaphore = asyncio.Semaphore(max_concurrent)
         tasks = [
-            _async_generate_one(item, api_key, output_dir, model_name, image_size, semaphore, base_url)
+            _async_generate_one(item, api_key, output_dir, model_name, image_size, semaphore, base_url, target_size)
             for item in image_prompts
         ]
         results = await asyncio.gather(*tasks)
@@ -207,6 +241,7 @@ def generate_image_from_prompt(
     output_dir: Path,
     model_name: str | None = None,
     image_size: str | None = None,
+    provider: str | None = None,
 ) -> Path:
     """
     单张图片生成（封面图，兼容旧调用）
@@ -218,5 +253,6 @@ def generate_image_from_prompt(
         model_name=model_name,
         image_size=image_size,
         max_concurrent=1,
+        provider=provider,
     )
     return result["cover"]

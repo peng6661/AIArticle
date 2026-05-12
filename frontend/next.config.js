@@ -1,34 +1,35 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // 将 /api/video/* 请求代理到 FastAPI 后端
   async rewrites() {
+    const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
     return [
       {
         source: '/api/video/:path*',
-        destination: 'http://127.0.0.1:8000/api/video/:path*',
+        destination: `${backendUrl}/api/video/:path*`,
       },
-      // pipeline 相关接口也代理到后端
       {
         source: '/pipeline/:path*',
-        destination: 'http://127.0.0.1:8000/pipeline/:path*',
+        destination: `${backendUrl}/pipeline/:path*`,
       },
-      // 其他后端接口
+      {
+        source: '/api/hot/:path*',
+        destination: `${backendUrl}/api/hot/:path*`,
+      },
       {
         source: '/api/serve-file',
-        destination: 'http://127.0.0.1:8000/api/serve-file',
+        destination: `${backendUrl}/api/serve-file`,
       },
       {
         source: '/api/video-info',
-        destination: 'http://127.0.0.1:8000/api/video-info',
+        destination: `${backendUrl}/api/video-info`,
       },
       {
         source: '/api/stream-video',
-        destination: 'http://127.0.0.1:8000/api/stream-video',
+        destination: `${backendUrl}/api/stream-video`,
       },
     ];
   },
 
-  // 图片域名白名单（用于封面图等跨域资源）
   images: {
     remotePatterns: [
       {
@@ -38,7 +39,6 @@ const nextConfig = {
     ],
   },
 
-  // 开发环境下不强制输出静态页面
   output: undefined,
 };
 

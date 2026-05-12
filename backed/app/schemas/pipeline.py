@@ -18,12 +18,20 @@ class BaseResponse(BaseModel):
 
 
 class RetryJobRequest(BaseModel):
-    api_key: str = Field("", description="AI 服务 API Key（SiliconFlow 或智谱），文章/生图重试时使用")
+    api_key: str = Field("", description="AI 服务 API Key（SiliconFlow 或智谱），文章生成重试时使用")
     ai_provider: str = Field("siliconflow", description="AI 服务提供商: siliconflow | zhipu")
     text_model: str = Field("", description="文章生成模型，留空使用 provider 默认")
-    image_model: str = Field("", description="图片生成模型，留空使用 provider 默认")
+    image_provider: str = Field("", description="图片生成服务商: siliconflow | zhipu，留空跟随 ai_provider")
+    image_api_key: str = Field("", description="图片生成专用 API Key，留空使用 api_key")
+    image_model: str = Field("", description="图片生成模型，留空使用 image_provider 默认")
+    skip_image_generation: bool = Field(False, description="是否跳过封面图生成")
     wechat_appid: str = Field("", description="公众号 AppID，发布/上传素材重试时使用")
     wechat_appsecret: str = Field("", description="公众号 AppSecret，发布/上传素材重试时使用")
+    rag_collection: str = Field("", description="RAG 知识库集合名，留空不使用 RAG")
+    rag_top_k: int = Field(5, description="RAG 检索返回的相关块数量", ge=1, le=20)
+    rag_embedding_model: str = Field("", description="RAG 向量模型，留空使用 config 默认值")
+    rag_embedding_provider: str = Field("", description="向量模型服务商: siliconflow | zhipu，留空使用 config 默认值")
+    rag_embedding_api_key: str = Field("", description="RAG 向量模型专用 API Key，留空则使用主 api_key")
 
 
 class RetryJobResponse(BaseResponse):
@@ -43,7 +51,7 @@ class BatchDeleteJobsResponse(BaseResponse):
 # ── Step 1: 全平台视频下载 ─────────────────────────────────────────────────
 
 class DownloadRequest(BaseModel):
-    share_text: str = Field(..., description="分享文本（支持抖音/Instagram/B站/TikTok/快手/X/YouTube）")
+    share_text: str = Field(..., min_length=1, description="分享文本（支持抖音/Instagram/B站/TikTok/快手/X/YouTube）")
     job_id: str = Field("", description="重试时传入已存在的 job_id，留空则创建新任务")
 
 
@@ -96,66 +104,20 @@ class ResumeJobRequest(BaseModel):
     api_key: str = Field("", description="AI 服务 API Key（SiliconFlow 或智谱），后续步骤可能需要")
     ai_provider: str = Field("siliconflow", description="AI 服务提供商: siliconflow | zhipu")
     text_model: str = Field("", description="文章生成模型，留空使用 provider 默认")
-    image_model: str = Field("", description="图片生成模型，留空使用 provider 默认")
+    image_provider: str = Field("", description="图片生成服务商: siliconflow | zhipu，留空跟随 ai_provider")
+    image_api_key: str = Field("", description="图片生成专用 API Key，留空使用 api_key")
+    image_model: str = Field("", description="图片生成模型，留空使用 image_provider 默认")
+    skip_image_generation: bool = Field(False, description="是否跳过封面图生成")
     wechat_appid: str = Field("", description="公众号 AppID，发布步骤需要")
     wechat_appsecret: str = Field("", description="公众号 AppSecret")
-
-
-# ── Step 4: 生成文章（JSON 结构化）─────────────────────────────────────────
-
-class GenerateArticleRequest(BaseModel):
-    job_id: str = Field(..., description="job_id")
-    api_key: str = Field(..., description="AI 服务 API Key（SiliconFlow 或智谱）")
-    ai_provider: str = Field("siliconflow", description="AI 服务提供商: siliconflow | zhipu")
-    topic: str = Field("", description="文章主题，留空使用默认")
-    extra_requirements: str = Field("", description="额外写作要求")
-    text_model: str = Field("", description="文章生成模型，留空使用默认")
-    temperature: float = Field(0.7, ge=0.0, le=2.0)
-    generate_inline_images: bool = Field(
-        True,
-        description=(
-            "是否在文章正文中生成插图。"
-            "True=AI 在正文插入占位符，后续步骤生成并替换为真实图片；"
-            "False=正文纯文字，封面图仍会生成。"
-        ),
-    )
     rag_collection: str = Field("", description="RAG 知识库集合名，留空不使用 RAG")
     rag_top_k: int = Field(5, description="RAG 检索返回的相关块数量", ge=1, le=20)
     rag_embedding_model: str = Field("", description="RAG 向量模型，留空使用 config 默认值")
     rag_embedding_provider: str = Field("", description="向量模型服务商: siliconflow | zhipu，留空使用 config 默认值")
+    rag_embedding_api_key: str = Field("", description="RAG 向量模型专用 API Key，留空则使用主 api_key")
 
 
-class GenerateArticleResponse(BaseResponse):
-    job_id: str = ""
-    article_title: str = Field("", description="AI 生成的文章标题")
-    image_count: int = Field(0, description="文章中图片占位符数量")
-    content_preview: str = Field("", description="正文前 300 字")
 
-
-# ── Step 5: 并发生图 + 上传微信素材 ────────────────────────────────────────
-
-class GenerateImageRequest(BaseModel):
-    job_id: str = Field(..., description="job_id")
-    api_key: str = Field(..., description="AI 服务 API Key（SiliconFlow 或智谱，生图用）")
-    ai_provider: str = Field("siliconflow", description="AI 服务提供商: siliconflow | zhipu")
-    wechat_appid: str = Field("", description="公众号 AppID，用于上传素材；留空则只下载到本地不上传")
-    wechat_appsecret: str = Field("", description="公众号 AppSecret")
-    image_model: str = Field("", description="图片模型，留空使用默认")
-    image_size: str = Field("", description="图片尺寸，留空使用默认")
-    generate_inline_images: bool = Field(
-        True,
-        description=(
-            "是否生成文章正文中的插图。"
-            "True=生成全部图片（封面+文中插图）并上传微信素材替换占位符；"
-            "False=仅生成封面图，正文占位符将被自动移除。"
-        ),
-    )
-
-
-class GenerateImageResponse(BaseResponse):
-    job_id: str = ""
-    image_count: int = Field(0, description="生成图片数量")
-    image_path: str = Field("", description="封面图本地路径")
 
 
 # ── Step 6: 替换占位符 + 微信 HTML 清洗 ────────────────────────────────────
@@ -196,19 +158,26 @@ class UploadVideoResponse(BaseResponse):
     job_id: str = ""
 
 
+# ── 文案上传（跳过 Step1-3，从 Step4 开始）─────────────────────────────
+
+class UploadTextResponse(BaseResponse):
+    job_id: str = ""
+
+
 # ── 一键全流程 ──────────────────────────────────────────────────────────────
 
 class FullPipelineRequest(BaseModel):
-    share_text: str = Field(..., description="分享文本（支持抖音/Instagram/B站/TikTok/快手/X/YouTube）")
+    share_text: str = Field(..., min_length=1, description="分享文本（支持抖音/Instagram/B站/TikTok/快手/X/YouTube）")
     siliconflow_api_key: str = Field(..., description="AI 服务 API Key（文章+生图）；SiliconFlow 或智谱均使用此字段")
     wechat_appid: str = Field("", description="公众号 AppID")
     wechat_appsecret: str = Field("", description="公众号 AppSecret")
     ai_provider: str = Field("siliconflow", description="AI 服务提供商: siliconflow | zhipu")
+    image_provider: str = Field("", description="图片生成服务商: siliconflow | zhipu，留空跟随 ai_provider")
+    image_api_key: str = Field("", description="图片生成专用 API Key，留空使用 siliconflow_api_key")
+    image_model: str = Field("", description="图片生成模型，留空使用 image_provider 默认")
     topic: str = Field("", description="文章主题")
     extra_requirements: str = Field("", description="额外写作要求")
     text_model: str = Field("", description="文章模型，留空使用 provider 默认")
-    image_model: str = Field("", description="图片模型，留空使用 provider 默认")
-    image_size: str = Field("", description="图片尺寸，留空使用 provider 默认")
     audio_format: str = Field("mp3")
     transcribe_model: str = Field("small")
     language: str = Field("zh")
@@ -217,23 +186,40 @@ class FullPipelineRequest(BaseModel):
     author: str = Field("", description="公众号作者")
     title: str = Field("", description="覆盖文章标题")
     original_notice: str = Field("", description="原创声明")
-    generate_inline_images: bool = Field(
-        False,
-        description=(
-            "是否生成文章正文插图。"
-            "True=生成全部图片（封面+文中插图）并上传微信素材替换占位符；"
-            "False=仅生成封面图，正文占位符将被自动移除。"
-        ),
-    )
-    skip_publish: bool = Field(False, description="是否跳过发布步骤（仅生成不发布）")
+    skip_image_generation: bool = Field(False, description="是否跳过封面图生成")
     rag_collection: str = Field("", description="RAG 知识库集合名，留空不使用 RAG")
     rag_top_k: int = Field(5, description="RAG 检索返回的相关块数量", ge=1, le=20)
     rag_embedding_model: str = Field("", description="RAG 向量模型，留空使用 config 默认值")
     rag_embedding_provider: str = Field("", description="向量模型服务商: siliconflow | zhipu，留空使用 config 默认值")
+    rag_embedding_api_key: str = Field("", description="RAG 向量模型专用 API Key，留空则使用主 api_key")
 
 
 class FullPipelineResponse(BaseResponse):
     job_id: str = ""
+
+
+# ── 再次生成（复用文案，直接从 Step4 开始）────────────────────────────────
+
+class RegenerateJobRequest(BaseModel):
+    api_key: str = Field(..., description="AI 服务 API Key（SiliconFlow 或智谱）")
+    ai_provider: str = Field("siliconflow", description="AI 服务提供商: siliconflow | zhipu")
+    text_model: str = Field("", description="文章生成模型，留空使用 provider 默认")
+    image_provider: str = Field("", description="图片生成服务商: siliconflow | zhipu，留空跟随 ai_provider")
+    image_api_key: str = Field("", description="图片生成专用 API Key，留空使用 api_key")
+    image_model: str = Field("", description="图片生成模型，留空使用 image_provider 默认")
+    skip_image_generation: bool = Field(False, description="是否跳过封面图生成")
+    wechat_appid: str = Field("", description="公众号 AppID")
+    wechat_appsecret: str = Field("", description="公众号 AppSecret")
+    rag_collection: str = Field("", description="RAG 知识库集合名，留空不使用 RAG")
+    rag_top_k: int = Field(5, description="RAG 检索返回的相关块数量", ge=1, le=20)
+    rag_embedding_model: str = Field("", description="RAG 向量模型，留空使用 config 默认值")
+    rag_embedding_provider: str = Field("", description="向量模型服务商: siliconflow | zhipu，留空使用 config 默认值")
+    rag_embedding_api_key: str = Field("", description="RAG 向量模型专用 API Key，留空则使用主 api_key")
+
+
+class RegenerateJobResponse(BaseResponse):
+    job_id: str = ""
+    message: str = ""
 
 
 # ── Job 状态查询 ────────────────────────────────────────────────────────────
@@ -252,7 +238,7 @@ class JobStatusResponse(BaseModel):
     status: str
     current_step: str | None
     steps: list[StepResultSchema]
-    skip_publish: bool = False
+    skip_image_generation: bool = False
     share_text: str | None
     video_path: str | None
     audio_path: str | None
@@ -260,7 +246,6 @@ class JobStatusResponse(BaseModel):
     article_body_markdown: str | None  # 生成的 Markdown 文章内容
     article_html: str | None          # 最终微信 HTML 预览（截断）
     wechat_html_path: str | None
-    image_path: str | None            # 封面图路径
     # Instagram 多图帖子支持
     media_type: str | None = None     # video / image
     image_count: int = 0              # 图片数量

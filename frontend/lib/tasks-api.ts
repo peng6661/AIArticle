@@ -54,9 +54,15 @@ export const taskApi = {
       api_key?: string;
       ai_provider?: string;
       text_model?: string;
+      image_provider?: string;
+      image_api_key?: string;
       image_model?: string;
       wechat_appid?: string;
       wechat_appsecret?: string;
+      rag_collection?: string;
+      rag_embedding_model?: string;
+      rag_embedding_provider?: string;
+      rag_embedding_api_key?: string;
     }
   ) => {
     const { data } = await apiClient.post(
@@ -79,9 +85,12 @@ export const taskApi = {
       api_key?: string;
       ai_provider?: string;
       text_model?: string;
+      image_provider?: string;
+      image_api_key?: string;
       image_model?: string;
       wechat_appid?: string;
       wechat_appsecret?: string;
+      skip_image_generation?: boolean;
     }
   ) => {
     const { data } = await apiClient.post(
@@ -94,11 +103,13 @@ export const taskApi = {
   // ── 上传本地视频（跳过下载步骤，从 Step2 音频提取开始）──────────────────
   uploadVideo: async (
     file: File,
+    skip_image_generation: boolean = false,
     onProgress?: (percent: number) => void,
     signal?: AbortSignal,
   ): Promise<{ success: boolean; message: string; job_id: string }> => {
     const formData = new FormData();
     formData.append("video", file);
+    formData.append("skip_image_generation", String(skip_image_generation));
 
     const { data } = await axios.post<{ success: boolean; message: string; job_id: string }>(
       `${API_BASE}/pipeline/upload-video`,
@@ -112,6 +123,35 @@ export const taskApi = {
           }
         },
         // 大文件上传超时放宽到 10 分钟
+        timeout: 10 * 60 * 1000,
+      },
+    );
+    return data;
+  },
+
+  // ── 上传文案（跳过 Step1-3，从 Step4 文章生成开始）─────────────────────
+  uploadText: async (
+    file: File,
+    skip_image_generation: boolean = false,
+    onProgress?: (percent: number) => void,
+    signal?: AbortSignal,
+  ): Promise<{ success: boolean; message: string; job_id: string }> => {
+    const formData = new FormData();
+    formData.append("text_file", file);
+    formData.append("skip_image_generation", String(skip_image_generation));
+
+    const { data } = await axios.post<{ success: boolean; message: string; job_id: string }>(
+      `${API_BASE}/pipeline/upload-text`,
+      formData,
+      {
+        headers: { "Content-Type": "multipart/form-data" },
+        signal,
+        onUploadProgress: (ev) => {
+          if (onProgress && ev.total) {
+            onProgress(Math.round((ev.loaded / ev.total) * 100));
+          }
+        },
+        // 文案上传超时放宽到 10 分钟
         timeout: 10 * 60 * 1000,
       },
     );
@@ -158,46 +198,6 @@ export const taskApi = {
     return data;
   },
 
-  /** 重试 Step4: AI生成文章 */
-  retryGenerateArticle: async (
-    jobId: string,
-    params: {
-      api_key: string;
-      ai_provider?: string;
-      topic?: string;
-      extra_requirements?: string;
-      text_model?: string;
-      temperature?: number;
-      generate_inline_images?: boolean;
-    }
-  ) => {
-    const { data } = await apiClient.post(
-      "/pipeline/step/generate_article",
-      { job_id: jobId, ...params }
-    );
-    return data;
-  },
-
-  /** 重试 Step5: 并发生图 + 上传微信素材 */
-  retryGenerateImage: async (
-    jobId: string,
-    params: {
-      api_key: string;
-      ai_provider?: string;
-      wechat_appid?: string;
-      wechat_appsecret?: string;
-      image_model?: string;
-      image_size?: string;
-      generate_inline_images?: boolean;
-    }
-  ) => {
-    const { data } = await apiClient.post(
-      "/pipeline/step/generate_image",
-      { job_id: jobId, ...params }
-    );
-    return data;
-  },
-
   /** 重试 Step6: 转换HTML */
   retryConvertHtml: async (jobId: string) => {
     const { data } = await apiClient.post("/pipeline/step/convert_html", {
@@ -222,6 +222,36 @@ export const taskApi = {
     const { data } = await apiClient.post(
       "/pipeline/step/publish_draft",
       { job_id: jobId, ...params }
+    );
+    return data;
+  },
+
+  // ── 再次生成（复用文案，从 Step4 开始）─────────────────────────────────────
+
+  /** 再次生成：基于已完成任务创建新任务，复用文本文案直接从文章生成开始 */
+  regenerateJob: async (
+    originalJobId: string,
+    params: {
+      api_key: string;
+      ai_provider?: string;
+      text_model?: string;
+      image_provider?: string;
+      image_api_key?: string;
+      image_model?: string;
+      image_size?: string;
+      skip_image_generation?: boolean;
+      wechat_appid?: string;
+      wechat_appsecret?: string;
+      rag_collection?: string;
+      rag_top_k?: number;
+      rag_embedding_model?: string;
+      rag_embedding_provider?: string;
+      rag_embedding_api_key?: string;
+    }
+  ) => {
+    const { data } = await apiClient.post(
+      `/pipeline/jobs/${originalJobId}/regenerate`,
+      params
     );
     return data;
   },
@@ -356,6 +386,7 @@ export interface KnowledgeDocument {
   id: number;
   title: string;
   source_type: string;
+  vector_doc_id?: string;
   chunk_count: number;
   status: string;
   error: string | null;

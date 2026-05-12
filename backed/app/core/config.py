@@ -48,6 +48,10 @@ class Settings:
     def outputs_dir(self) -> Path:
         return Path(self.get("paths", "outputs_dir", default="outputs"))
 
+    @property
+    def transcripts_dir(self) -> Path:
+        return Path(self.get("paths", "transcripts_dir", default="transcripts"))
+
     # ── 抖音 ─────────────────────────────────────────
     @property
     def douyin_user_agent(self) -> str:
@@ -111,20 +115,25 @@ class Settings:
         return self.get("siliconflow", "default_text_model", default="Qwen/Qwen3-14B")
 
     @property
-    def siliconflow_default_image_model(self) -> str:
-        return self.get("siliconflow", "default_image_model", default="black-forest-labs/FLUX.1-schnell")
-
-    @property
     def siliconflow_default_temperature(self) -> float:
         return float(self.get("siliconflow", "default_temperature", default=0.7))
 
     @property
-    def siliconflow_default_image_size(self) -> str:
-        return self.get("siliconflow", "default_image_size", default="1664x928")
-
-    @property
     def siliconflow_max_tokens(self) -> int:
         return int(self.get("siliconflow", "max_tokens", default=4096))
+
+    @property
+    def siliconflow_default_image_model(self) -> str:
+        return self.get("siliconflow", "default_image_model", default="stabilityai/stable-diffusion-3-5-large")
+
+    @property
+    def siliconflow_default_image_size(self) -> str:
+        return self.get("siliconflow", "default_image_size", default="1024x768")
+
+    @property
+    def siliconflow_target_image_size(self) -> str | None:
+        val = self.get("siliconflow", "target_image_size", default="")
+        return val if val else None
 
     # ── 智谱 AI ───────────────────────────────────────
     @property
@@ -136,20 +145,25 @@ class Settings:
         return self.get("zhipu", "default_text_model", default="glm-4-flash")
 
     @property
-    def zhipu_default_image_model(self) -> str:
-        return self.get("zhipu", "default_image_model", default="cogview-3")
-
-    @property
     def zhipu_default_temperature(self) -> float:
         return float(self.get("zhipu", "default_temperature", default=0.7))
+
+    @property
+    def zhipu_max_tokens(self) -> int:
+        return int(self.get("zhipu", "max_tokens", default=4096))
+
+    @property
+    def zhipu_default_image_model(self) -> str:
+        return self.get("zhipu", "default_image_model", default="cogview-3")
 
     @property
     def zhipu_default_image_size(self) -> str:
         return self.get("zhipu", "default_image_size", default="1024x1024")
 
     @property
-    def zhipu_max_tokens(self) -> int:
-        return int(self.get("zhipu", "max_tokens", default=4096))
+    def zhipu_target_image_size(self) -> str | None:
+        val = self.get("zhipu", "target_image_size", default="")
+        return val if val else None
 
     # ── Embedding Provider 路由 ──────────────────────────
     EMBEDDING_PROVIDER_URLS: dict[str, str] = {
@@ -160,6 +174,7 @@ class Settings:
         "siliconflow": "Qwen/Qwen3-Embedding-8B",
         "zhipu": "embedding-3",
     }
+
 
     def get_embedding_base_url(self, provider: str | None = None) -> str:
         """根据服务商名返回 embedding API 端点。provider 为空时使用 config 默认值。"""
@@ -183,17 +198,13 @@ class Settings:
             return {
                 "base_url": self.zhipu_base_url,
                 "default_text_model": self.zhipu_default_text_model,
-                "default_image_model": self.zhipu_default_image_model,
                 "default_temperature": self.zhipu_default_temperature,
-                "default_image_size": self.zhipu_default_image_size,
                 "max_tokens": self.zhipu_max_tokens,
             }
         return {
             "base_url": self.siliconflow_base_url,
             "default_text_model": self.siliconflow_default_text_model,
-            "default_image_model": self.siliconflow_default_image_model,
             "default_temperature": self.siliconflow_default_temperature,
-            "default_image_size": self.siliconflow_default_image_size,
             "max_tokens": self.siliconflow_max_tokens,
         }
 
@@ -279,6 +290,8 @@ class Settings:
         留空默认 "github"
         """
         return self.get("youtube", "remote_components", default="github")
+
+
 
     # ── 文章 ─────────────────────────────────────────
     @property

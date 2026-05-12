@@ -37,7 +37,7 @@ class StepName(str, Enum):
     EXTRACT_AUDIO = "extract_audio"          # 步骤2: 提取音频
     TRANSCRIBE = "transcribe"                # 步骤3: 语音转文字
     GENERATE_ARTICLE = "generate_article"   # 步骤4: 生成文章（JSON 结构化输出）
-    GENERATE_IMAGE = "generate_image"        # 步骤5: 并发生成配图 + 上传微信素材
+    GENERATE_IMAGE = "generate_image"       # 步骤5: 生成封面图
     CONVERT_HTML = "convert_html"            # 步骤6: 替换占位符，转换微信 HTML
     PUBLISH_DRAFT = "publish_draft"          # 步骤7: 发布草稿到微信
 
@@ -74,14 +74,10 @@ class PipelineJob:
     article_title: str | None = None            # {"title": "..."}
     article_body_markdown: str | None = None    # {"content": "## 标题\n\n段落【图片占位符:img_01】"}
     article_body_html: str | None = None        # {"content": "<p>...【图片占位符:img_01】...</p>"}
-    article_image_prompts: list | None = None   # [{"id":"img_01","prompt":"..."}]
-    generate_inline_images: bool = True         # Step4 写入，False 时仅封面
-    skip_publish: bool = False                  # 一键流程是否跳过 Step7 发布草稿
-
-    # ── Step 5 产物：图片生成 & 微信素材上传 ─────────────────────────────────
-    image_path: str | None = None               # 封面图（第一张）绝对路径
-    # {"img_01": {"local_path": "...", "wechat_url": "...", "media_id": "..."}}
-    wechat_image_map: dict | None = None
+    # ── Step 5 产物 ───────────────────────────────────────────────────────────
+    skip_image_generation: bool = False         # 是否跳过 Step5 封面图生成
+    article_image_prompts: list[dict] = field(default_factory=list)  # 图片提示词列表 [{"id": "cover", "prompt": "..."}]
+    cover_image_path: str | None = None         # 生成的封面图本地路径
 
     # ── Step 6 产物：最终微信 HTML ────────────────────────────────────────────
     article_html: str | None = None             # 替换占位符后的最终正文 HTML
@@ -101,13 +97,17 @@ class PipelineStore:
 
     @staticmethod
     def _step_to_model(job_id: str, step: StepResult) -> PipelineStepModel:
-        started_at = datetime.fromisoformat(step.started_at)
+        # 处理空字符串 started_at
+        started_at = (
+            datetime.fromisoformat(step.started_at)
+            if step.started_at and step.started_at.strip() else None
+        )
         finished_at = (
             datetime.fromisoformat(step.finished_at)
-            if step.finished_at else None
+            if step.finished_at and step.finished_at.strip() else None
         )
         duration = None
-        if finished_at:
+        if started_at and finished_at:
             duration = (finished_at - started_at).total_seconds()
 
         return PipelineStepModel(
@@ -133,6 +133,26 @@ class PipelineStore:
         )
 
     @staticmethod
+    def _parse_json_field(value):
+        """解析 JSON 字段，自动处理双重序列化的情况"""
+        if value is None:
+            return None
+        if isinstance(value, (list, dict)):
+            return value  # 已经是正确类型
+        if isinstance(value, str):
+            import json
+            try:
+                return json.loads(value)
+            except json.JSONDecodeError:
+                # 双重转义情况：'{\"key\": \"value\"}' -> {"key": "value"}
+                try:
+                    unescaped = value.replace('\\"', '"')
+                    return json.loads(unescaped)
+                except json.JSONDecodeError:
+                    return value  # 返回原字符串
+        return value
+
+    @staticmethod
     def _model_to_job(model: PipelineJobModel) -> PipelineJob:
         job = PipelineJob(
             job_id=model.job_id,
@@ -150,11 +170,9 @@ class PipelineStore:
             article_title=model.article_title,
             article_body_markdown=model.article_body_markdown,
             article_body_html=model.article_body_html,
-            article_image_prompts=model.article_image_prompts,
-            generate_inline_images=model.generate_inline_images,
-            skip_publish=model.skip_publish,
-            image_path=model.image_path,
-            wechat_image_map=model.wechat_image_map,
+            skip_image_generation=model.skip_image_generation,
+            article_image_prompts=PipelineStore._parse_json_field(model.article_image_prompts) or [],
+            cover_image_path=model.cover_image_path,
             article_html=model.article_html,
             wechat_html_path=model.wechat_html_path,
             draft_media_id=model.draft_media_id,
@@ -187,12 +205,9 @@ class PipelineStore:
         model.article_title = job.article_title
         model.article_body_markdown = job.article_body_markdown
         model.article_body_html = job.article_body_html
-        model.article_image_prompts = job.article_image_prompts
-        model.generate_inline_images = job.generate_inline_images
-        model.skip_publish = job.skip_publish
-
-        model.image_path = job.image_path
-        model.wechat_image_map = job.wechat_image_map
+        model.skip_image_generation = job.skip_image_generation
+        model.article_image_prompts = job.article_image_prompts or []
+        model.cover_image_path = job.cover_image_path
         model.article_html = job.article_html
         model.wechat_html_path = job.wechat_html_path
 
@@ -277,14 +292,8 @@ class PipelineStore:
             paths.append(Path(job.transcript_path))
 
         # Step5 产物：封面图
-        if job.image_path:
-            paths.append(Path(job.image_path))
-
-        # Step5 产物：wechat_image_map 中所有本地图片
-        if job.wechat_image_map:
-            for _img_id, info in job.wechat_image_map.items():
-                if isinstance(info, dict) and info.get("local_path"):
-                    paths.append(Path(info["local_path"]))
+        if job.cover_image_path:
+            paths.append(Path(job.cover_image_path))
 
         # Step6 产物：微信 HTML
         if job.wechat_html_path:

@@ -6,11 +6,13 @@ Embedding 服务
 from __future__ import annotations
 
 import importlib
-import subprocess
-import sys
+import logging
 from typing import Any
 
 from app.core.config import get_settings
+from app.services.rag.embedding_cache import embedding_cache
+
+logger = logging.getLogger(__name__)
 
 # 智谱 embedding API 端点
 ZHIPU_EMBEDDING_URL = "https://open.bigmodel.cn/api/paas/v4/embeddings"
@@ -23,9 +25,7 @@ def _ensure_openai():
     try:
         return importlib.import_module("openai")
     except ImportError:
-        print("未检测到依赖 openai，正在自动安装...")
-        subprocess.run([sys.executable, "-m", "pip", "install", "openai"], check=True)
-        return importlib.import_module("openai")
+        raise ImportError("未检测到依赖 openai；请先执行 pip install -r requirements.txt")
 
 
 def embed_texts(
@@ -95,7 +95,7 @@ def embed_query(
     provider: str | None = None,
 ) -> list[float]:
     """
-    单条查询文本转向量。
+    单条查询文本转向量（带缓存）。
 
     Args:
         query: 查询文本
@@ -107,5 +107,18 @@ def embed_query(
     Returns:
         向量
     """
+    # 1. 先查缓存
+    cached = embedding_cache.get(query, model, provider)
+    if cached is not None:
+        print(f"[EmbeddingCache] 命中缓存，跳过 API 调用 ({len(query)} 字符)")
+        return cached
+    
+    # 2. 缓存未命中，调用 API
+    print(f"[EmbeddingCache] 缓存未命中，调用 API ({len(query)} 字符)")
     results = embed_texts([query], api_key, model, base_url, provider)
-    return results[0]
+    vector = results[0]
+    
+    # 3. 写入缓存
+    embedding_cache.set(query, model, provider, vector)
+    
+    return vector

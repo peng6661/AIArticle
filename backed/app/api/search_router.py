@@ -12,7 +12,7 @@ from app.services.video_search_service import (
     PLATFORM_FETCHERS,
 )
 
-router = APIRouter(prefix="/api/video", tags=["视频搜索"])
+router = APIRouter(prefix="/api/video/search", tags=["视频搜索"])
 
 
 class SearchRequest(BaseModel):
@@ -35,7 +35,7 @@ def list_platforms():
     }
 
 
-@router.post("/search", summary="多平台视频搜索")
+@router.post("", summary="多平台视频搜索")
 async def search_videos(req: SearchRequest):
     """
     按关键词并发搜索多个视频平台，返回标准化结果。

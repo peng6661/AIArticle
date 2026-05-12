@@ -205,7 +205,7 @@ class RagService:
     ) -> dict:
         """内部方法：将已解析的文本入库。"""
         cfg = get_settings()
-        doc_id_str = str(uuid.uuid4())[:8]
+        vector_doc_id = str(uuid.uuid4())[:8]
 
         # 1. 在数据库创建文档记录
         with get_db_ctx() as db:
@@ -220,6 +220,7 @@ class RagService:
                 title=title,
                 source_type=source_type,
                 file_path=file_path,
+                vector_doc_id=vector_doc_id,
                 chunk_count=0,
                 status="processing",
                 source_job_id=source_job_id,
@@ -247,7 +248,7 @@ class RagService:
             chroma_name = self._chroma_name(collection_name)
             vector_store.add_documents(
                 collection_name=chroma_name,
-                doc_id=doc_id_str,
+                doc_id=vector_doc_id,
                 chunks=chunks,
                 embeddings=embeddings,
             )
@@ -271,7 +272,7 @@ class RagService:
 
             return {
                 "doc_id": doc_db_id,
-                "doc_id_str": doc_id_str,
+                "vector_doc_id": vector_doc_id,
                 "title": title,
                 "chunk_count": len(chunks),
                 "status": "ready",
@@ -295,6 +296,7 @@ class RagService:
         top_k: int | None = None,
         embedding_model: str | None = None,
         embedding_provider: str | None = None,
+        embedding_api_key: str | None = None,
     ) -> str:
         """
         检索相关上下文，返回拼接后的文本。
@@ -305,6 +307,7 @@ class RagService:
             api_key: LLM API Key（若 config 配置了专用 embedding_api_key 则优先使用）
             top_k: 返回的最大结果数
             embedding_model: 向量模型名，留空使用 config 默认值
+            embedding_api_key: 前端传入的向量模型专用 API Key
 
         Returns:
             拼接后的相关上下文文本
@@ -313,8 +316,8 @@ class RagService:
         if top_k is None:
             top_k = cfg.rag_top_k
 
-        # 优先使用 config 中专用的 embedding API Key
-        embed_key = cfg.rag_embedding_api_key or api_key
+        # 优先级：前端传入的 embedding_api_key > config 中专用的 embedding_api_key > 主 api_key
+        embed_key = embedding_api_key or cfg.rag_embedding_api_key or api_key
 
         # 截取查询文本的前 1000 字做 embedding（避免过长）
         query_for_embedding = query_text[:1000]
@@ -366,6 +369,7 @@ class RagService:
                     "id": d.id,
                     "title": d.title,
                     "source_type": d.source_type,
+                    "vector_doc_id": d.vector_doc_id,
                     "chunk_count": d.chunk_count,
                     "status": d.status,
                     "error": d.error,
@@ -377,33 +381,52 @@ class RagService:
 
     def delete_document(self, collection_name: str, doc_id: int) -> bool:
         """删除文档及其向量数据。"""
-        cfg = get_settings()
+        vector_doc_id = ""
+        chunk_count = 0
+        chroma_name = self._chroma_name(collection_name)
         with get_db_ctx() as db:
+            collection = db.scalar(
+                select(KnowledgeCollectionModel).where(KnowledgeCollectionModel.name == collection_name)
+            )
+            if not collection:
+                return False
+
             doc = db.scalar(
-                select(KnowledgeDocumentModel).where(KnowledgeDocumentModel.id == doc_id)
+                select(KnowledgeDocumentModel).where(
+                    KnowledgeDocumentModel.id == doc_id,
+                    KnowledgeDocumentModel.collection_id == collection.id,
+                )
             )
             if not doc:
                 return False
 
             chunk_count = doc.chunk_count
+            vector_doc_id = doc.vector_doc_id or ""
             db.delete(doc)
 
             # 更新集合统计
             db.execute(
                 update(KnowledgeCollectionModel)
-                .where(KnowledgeCollectionModel.name == collection_name)
+                .where(KnowledgeCollectionModel.id == collection.id)
                 .values(
                     document_count=KnowledgeCollectionModel.document_count - 1,
                     chunk_count=KnowledgeCollectionModel.chunk_count - chunk_count,
                 )
             )
 
-        # 从 ChromaDB 删除（需要知道 doc_id_str，这里用 doc.id 的格式）
-        # 注意：ChromaDB 中的 doc_id 是 uuid 前8位，这里用数据库 id 匹配
-        # 为了简化，我们通过 metadata 中的 doc_id 来匹配
-        # 但实际上 ingest 时用的是 uuid 前8位，所以这里需要存储 doc_id_str
-        # 暂时通过 collection 级别重建来处理，后续可优化
-        logger.info(f"[RAG] 文档已从数据库删除: doc_id={doc_id}")
+        if vector_doc_id:
+            deleted_chunks = vector_store.delete_documents_by_source(
+                collection_name=chroma_name,
+                doc_id=vector_doc_id,
+            )
+            logger.info(
+                f"[RAG] 文档已删除: doc_id={doc_id}, vector_doc_id={vector_doc_id}, "
+                f"vector_chunks={deleted_chunks}"
+            )
+        else:
+            logger.warning(
+                f"[RAG] 文档已从数据库删除，但缺少 vector_doc_id，无法精确清理向量分块: doc_id={doc_id}"
+            )
 
         return True
 

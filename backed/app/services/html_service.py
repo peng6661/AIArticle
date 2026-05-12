@@ -6,8 +6,6 @@ from __future__ import annotations
 
 import importlib
 import re
-import subprocess
-import sys
 from pathlib import Path
 from typing import Iterable
 
@@ -69,16 +67,14 @@ def _ensure_bs4():
     try:
         return importlib.import_module("bs4")
     except ImportError:
-        subprocess.run([sys.executable, "-m", "pip", "install", "beautifulsoup4"], check=True)
-        return importlib.import_module("bs4")
+        raise ImportError("未检测到依赖 beautifulsoup4；请先执行 pip install -r requirements.txt")
 
 
 def _ensure_markdown():
     try:
         return importlib.import_module("markdown")
     except ImportError:
-        subprocess.run([sys.executable, "-m", "pip", "install", "markdown"], check=True)
-        return importlib.import_module("markdown")
+        raise ImportError("未检测到依赖 markdown；请先执行 pip install -r requirements.txt")
 
 
 def _rgb_to_hex(value: str) -> str:

@@ -35,11 +35,11 @@ async def run_full_pipeline(req: FullPipelineRequest, background_tasks: Backgrou
     """
     提交全流程任务，立即返回 job_id，通过 GET /pipeline/jobs/{job_id} 查询进度。
     抖音下载 → 提取音频 → 语音转写 → AI生成文章(JSON)
-    → 并发生图+上传微信 → 替换占位符+清洗HTML → 发布草稿+打开浏览器
+    → 替换占位符+清洗HTML → 发布草稿+打开浏览器
     """
     job = pipeline_store.create()
     job.share_text = req.share_text
-    job.skip_publish = req.skip_publish
+    job.skip_image_generation = req.skip_image_generation
     pipeline_store.save(job)
     background_tasks.add_task(_run_full_pipeline_bg, job.job_id, req)
     return FullPipelineResponse(
@@ -75,11 +75,15 @@ def _run_full_pipeline_bg(job_id: str, req: FullPipelineRequest):
     from app.services.youtube_download_service import YouTubeExtractor
     from app.services.audio_service import extract_audio
     from app.services.transcribe_service import transcribe_audio
-    from app.services.article_service import generate_article
-    from app.services.image_service import generate_images_concurrent, upload_images_to_wechat_concurrent
+    from app.services.article_service import (
+        create_content_task,
+        run_step4_pipeline,
+        get_content_task,
+    )
     from app.services.html_service import convert_to_wechat_html
+    from app.services.image_service import generate_images_concurrent
     from app.services.wechat_service import (
-        get_access_token, replace_image_placeholders, publish_draft
+        publish_draft
     )
 
     job = pipeline_store.get(job_id)
@@ -277,7 +281,7 @@ def _run_full_pipeline_bg(job_id: str, req: FullPipelineRequest):
         _fail_step(job, result, f"[Step3-转写] {e}")
         return
 
-    # ── Step 4: AI 生成文章（JSON 结构化输出）────────────────────────────
+    # ── Step 4: AI 生成文章（LangGraph + RAG + MySQL 任务追踪）─────────────
     try:
         result = _begin_step(job, StepName.GENERATE_ARTICLE)
     except RuntimeError as e:
@@ -285,43 +289,69 @@ def _run_full_pipeline_bg(job_id: str, req: FullPipelineRequest):
             return
         raise
     try:
-        ai_cfg = cfg.get_ai_provider_config(req.ai_provider)
         # ── 打印配置信息，方便调试 ──────────────────────────────────────
         masked_key = (req.siliconflow_api_key[:6] + "****" + req.siliconflow_api_key[-4:]) if req.siliconflow_api_key and len(req.siliconflow_api_key) > 10 else "（空）"
-        _text_model = req.text_model or ai_cfg["default_text_model"]
+        _text_model = req.text_model or cfg.siliconflow_default_text_model
         print(f"\n{'='*60}")
-        print(f"[Step4-文章] 配置信息 | job_id={job_id} | ai_provider={req.ai_provider}")
-        print(f"  base_url  = {ai_cfg['base_url']}")
-        print(f"  api_key   = {masked_key}")
+        print(f"[Step4-文章] 配置信息 | job_id={job_id}")
         print(f"  model     = {_text_model}")
-        print(f"  temp      = {ai_cfg['default_temperature']}")
-        print(f"  max_tokens= {ai_cfg['max_tokens']}")
+        print(f"  rag       = {req.rag_collection or '(未配置)'}")
+        print(f"  skip_image_generation = {req.skip_image_generation}")
+        print(f"  image_provider = {req.image_provider or '(未配置)'}")
+        print(f"  image_model = {req.image_model or '(未配置)'}")
         print(f"{'='*60}\n")
-        article_data = generate_article(
-            material_path=Path(job.transcript_path),
-            topic=req.topic or None,
-            extra_requirements=req.extra_requirements,
-            api_key=req.siliconflow_api_key,
-            model_name=_text_model,
-            temperature=ai_cfg["default_temperature"],
-            generate_inline_images=req.generate_inline_images,
-            base_url=ai_cfg["base_url"],
-            max_tokens=ai_cfg["max_tokens"],
+
+        # 1. 在 MySQL 中创建 content_task
+        task_id = create_content_task(
+            pipeline_job_id=job_id,
+            transcript=job.transcript_text,
             rag_collection=req.rag_collection or None,
-            rag_top_k=req.rag_top_k,
             rag_embedding_model=req.rag_embedding_model or None,
             rag_embedding_provider=req.rag_embedding_provider or None,
+            rag_embedding_api_key=req.rag_embedding_api_key or None,
         )
-        # article_data = {"title": "...", "content": "Markdown格式正文(含图片占位符)", "image_prompts": [...]}
-        job.article_title = article_data["title"]
-        job.article_body_markdown = article_data["content"]   # content 是 Markdown，存到此字段
-        job.article_body_html = article_data["content"]      # 同时写入 HTML 字段（Step6 会清洗转换）
-        job.article_image_prompts = article_data["image_prompts"]
-        job.generate_inline_images = req.generate_inline_images
+        print(f"[Step4] 创建任务 | task_id={task_id}")
+
+        # 2. 执行 LangGraph 智能写作流水线（同步，后台线程）
+        print(f"[Step4] 开始执行 run_step4_pipeline")
+        output = run_step4_pipeline(
+            task_id=task_id,
+            transcript=job.transcript_text,
+            api_key=req.siliconflow_api_key or "",
+            ai_provider=req.ai_provider or "siliconflow",
+            text_model=req.text_model or "",
+            image_provider=req.image_provider or "",
+            image_model=req.image_model or "",
+            skip_image_generation=req.skip_image_generation,
+        )
+        print(f"[Step4] 执行完成 | status={output['status']} | image_prompt={output.get('image_prompt', 'None')}")
+
+        if output["status"] == "failed":
+            raise RuntimeError(output.get("error", "文章生成失败"))
+
+        # 3. 从 DB 读取最终结果
+        task = get_content_task(task_id)
+        if not task or not task["article_final"]:
+            raise RuntimeError("未能获取到最终文章内容")
+
+        # 4. 填充到 PipelineJob（保持下游兼容）
+        job.article_title = task["article_title"] or "AI生成文章"
+        job.article_body_markdown = task["article_final"]
+        job.article_body_html = task["article_final"]  # Step6 会清洗转换
+        
+        # 设置图片提示词
+        if req.skip_image_generation:
+            job.article_image_prompts = []
+            print(f"[Step4] skip_image_generation=True，设置 article_image_prompts=[]")
+        elif task.get("image_prompt"):
+            job.article_image_prompts = [{"id": "cover", "prompt": task["image_prompt"]}]
+            print(f"[Step4] 设置 article_image_prompts=[{{'id': 'cover', 'prompt': '{task['image_prompt'][:50]}...'}}]")
+        else:
+            job.article_image_prompts = []
+            print(f"[Step4] task['image_prompt'] 为空，设置 article_image_prompts=[]")
+
         _finish_step(job, result, data={
-            "title": article_data["title"],
-            "generate_inline_images": req.generate_inline_images,
-            "image_count": len(article_data["image_prompts"]),
+            "title": job.article_title,
         })
     except Exception as e:
         if isinstance(e, RuntimeError) and ("暂停" in str(e) or "取消" in str(e) or "删除" in str(e)):
@@ -329,93 +359,72 @@ def _run_full_pipeline_bg(job_id: str, req: FullPipelineRequest):
         _fail_step(job, result, f"[Step4-文章] {e}")
         return
 
-    # ── Step 5: 并发生图 + 上传微信素材 ──────────────────────────────────
-    try:
-        result = _begin_step(job, StepName.GENERATE_IMAGE)
-    except RuntimeError as e:
-        if "暂停" in str(e) or "取消" in str(e) or "删除" in str(e):
-            return
-        raise
-    try:
-        all_prompts = job.article_image_prompts
-        generate_inline = req.generate_inline_images
+    # ── Step 5: 生成封面图 ──────────────────────────────────────────────────
+    print(f"[Step5] 检查图片生成 | skip_image_generation={req.skip_image_generation}")
+    if req.skip_image_generation:
+        print(f"[Step5] skip_image_generation=True，跳过封面图生成，使用默认占位图")
+        from app.services.wechat_service import _generate_placeholder_cover
+        placeholder = _generate_placeholder_cover()
+        job.cover_image_path = str(placeholder)
+        pipeline_store.save(job)
+    else:
+        try:
+            result = _begin_step(job, StepName.GENERATE_IMAGE)
+        except RuntimeError as e:
+            if "暂停" in str(e) or "取消" in str(e) or "删除" in str(e):
+                return
+            raise
+        try:
+            image_prompts = getattr(job, 'article_image_prompts', [])
+            print(f"[Step5] 开始生成图片 | image_prompts长度={len(image_prompts)}")
+            
+            if image_prompts:
+                output_dir = cfg.outputs_dir / f"{job_id}_images"
+                output_dir.mkdir(parents=True, exist_ok=True)
 
-        # 5a. 决定本次实际生成哪些图
-        # generate_inline=True  → 生成全部（封面 cover + 文中 img_01...）
-        # generate_inline=False → 仅生成封面（id=cover 或第一张）
-        if generate_inline:
-            prompts_to_generate = all_prompts
-        else:
-            cover_prompt = next(
-                (p for p in all_prompts if p["id"] == "cover"),
-                all_prompts[0] if all_prompts else None,
-            )
-            prompts_to_generate = [cover_prompt] if cover_prompt else []
+                image_provider = req.image_provider or req.ai_provider or "siliconflow"
+                image_api_key = req.image_api_key or req.siliconflow_api_key
+                image_model_name = req.image_model or None
 
-        if not prompts_to_generate:
-            raise ValueError("没有可生成的图片 prompt，请检查 Step4 输出")
+                ai_cfg = cfg.get_ai_provider_config(image_provider)
+                image_base_url = ai_cfg.get("base_url", cfg.siliconflow_base_url)
 
-        # ── 打印配置信息，方便调试 ──────────────────────────────────────
-        _image_model = req.image_model or ai_cfg["default_image_model"]
-        _image_size = req.image_size or ai_cfg["default_image_size"]
-        print(f"\n{'='*60}")
-        print(f"[Step5-配图] 配置信息 | job_id={job_id} | ai_provider={req.ai_provider}")
-        print(f"  base_url  = {ai_cfg['base_url']}")
-        print(f"  api_key   = {masked_key}")
-        print(f"  model     = {_image_model}")
-        print(f"  size      = {_image_size}")
-        print(f"{'='*60}\n")
+                if image_provider == "zhipu":
+                    image_size = cfg.zhipu_default_image_size
+                    if image_model_name is None:
+                        image_model_name = cfg.zhipu_default_image_model
+                else:
+                    image_size = cfg.siliconflow_default_image_size
+                    if image_model_name is None:
+                        image_model_name = cfg.siliconflow_default_image_model
 
-        # 5b. 并发生图，下载到本地
-        local_map = generate_images_concurrent(
-            image_prompts=prompts_to_generate,
-            api_key=req.siliconflow_api_key,
-            output_dir=cfg.outputs_dir,
-            model_name=_image_model,
-            image_size=_image_size,
-            base_url=ai_cfg["base_url"],
-        )
-
-        # 5c. 封面图：优先 id=cover，兜底取第一张
-        cover_local_path = local_map.get("cover") or next(iter(local_map.values()), None)
-        if cover_local_path:
-            job.image_path = str(cover_local_path.resolve())
-
-        # 5d. 只有开启文中插图 且 有微信凭证时，才上传正文图片到微信素材库
-        #     cover 图不上传为正文素材（Step7 单独以 thumb 类型上传）
-        appid = req.wechat_appid or cfg.wechat_appid
-        appsecret = req.wechat_appsecret or cfg.wechat_appsecret
-        wechat_upload_map: dict[str, dict] = {}
-        if generate_inline and appid and appsecret:
-            inline_map = {k: v for k, v in local_map.items() if k != "cover"}
-            if inline_map:
-                access_token = get_access_token(appid, appsecret)
-                wechat_upload_map = upload_images_to_wechat_concurrent(
-                    local_image_map=inline_map, access_token=access_token,
+                print(f"[Step5] 调用 generate_images_concurrent | provider={image_provider} | model={image_model_name}")
+                image_map = generate_images_concurrent(
+                    image_prompts=image_prompts,
+                    api_key=image_api_key,
+                    output_dir=output_dir,
+                    model_name=image_model_name,
+                    image_size=image_size,
+                    base_url=image_base_url,
+                    provider=image_provider,
                 )
+                if "cover" in image_map:
+                    job.cover_image_path = str(image_map["cover"])
+                print(f"[Step5] 图片生成成功 | cover_image_path={job.cover_image_path}")
+            else:
+                print(f"[Step5] 警告: image_prompts 为空，使用默认占位图")
+                from app.services.wechat_service import _generate_placeholder_cover
+                placeholder = _generate_placeholder_cover()
+                job.cover_image_path = str(placeholder)
 
-        # 5e. 合并结果
-        combined: dict[str, dict] = {
-            img_id: {
-                "local_path": str(lp.resolve()),
-                "wechat_url": wechat_upload_map.get(img_id, {}).get("wechat_url", ""),
-                "media_id": wechat_upload_map.get(img_id, {}).get("media_id", ""),
-            }
-            for img_id, lp in local_map.items()
-        }
-        job.wechat_image_map = combined
-
-        _finish_step(job, result, data={
-            "generate_inline_images": generate_inline,
-            "cover_path": job.image_path,
-            "image_count": len(combined),
-            "uploaded_to_wechat": bool(wechat_upload_map),
-        })
-    except Exception as e:
-        if isinstance(e, RuntimeError) and ("暂停" in str(e) or "取消" in str(e) or "删除" in str(e)):
+            _finish_step(job, result, data={
+                "cover_image_path": job.cover_image_path,
+            })
+        except Exception as e:
+            if isinstance(e, RuntimeError) and ("暂停" in str(e) or "取消" in str(e) or "删除" in str(e)):
+                return
+            _fail_step(job, result, f"[Step5-生图] {e}")
             return
-        _fail_step(job, result, f"[Step5-配图] {e}")
-        return
 
     # ── Step 6: 替换占位符 + 微信 HTML 清洗 ─────────────────────────────
     try:
@@ -426,11 +435,6 @@ def _run_full_pipeline_bg(job_id: str, req: FullPipelineRequest):
         raise
     try:
         html = job.article_body_html
-
-        if req.generate_inline_images and job.wechat_image_map:
-            # 将 【图片占位符：img_01】 替换为微信域 <img src="..."> 标签
-            html = replace_image_placeholders(html, job.wechat_image_map)
-        # generate_inline_images=False 时，article_body_html 已无占位符（Step4 已清除），直接清洗
 
         # Markdown → 微信兼容 HTML（先转 Markdown 再清洗）
         wechat_html = convert_to_wechat_html(html, is_markdown=True)
@@ -444,7 +448,6 @@ def _run_full_pipeline_bg(job_id: str, req: FullPipelineRequest):
         _finish_step(job, result, data={
             "wechat_html_path": str(output_path),
             "title": job.article_title,
-            "generate_inline_images": req.generate_inline_images,
         })
     except Exception as e:
         if isinstance(e, RuntimeError) and ("暂停" in str(e) or "取消" in str(e) or "删除" in str(e)):
@@ -453,11 +456,6 @@ def _run_full_pipeline_bg(job_id: str, req: FullPipelineRequest):
         return
 
     # ── Step 7: 发布草稿 ──────────────────────────────────────────────────
-    if req.skip_publish:
-        job.status = JobStatus.SUCCESS
-        pipeline_store.save(job)
-        return
-
     try:
         result = _begin_step(job, StepName.PUBLISH_DRAFT)
     except RuntimeError as e:
@@ -477,7 +475,7 @@ def _run_full_pipeline_bg(job_id: str, req: FullPipelineRequest):
             appid=appid,
             appsecret=appsecret,
             content_html=wechat_html,
-            cover_image_path=Path(job.image_path),
+            cover_image_path=job.cover_image_path,
             title=resolved_title,
             author=req.author or None,
             original_notice=req.original_notice or None,

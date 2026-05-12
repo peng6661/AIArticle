@@ -4,11 +4,10 @@ ORM 数据库模型
 表结构：
   pipeline_jobs         主任务表（1 条记录 = 1 次完整流水线执行）
   pipeline_steps        步骤明细表（与 pipeline_jobs 一对多）
-  wechat_image_assets   正文图片素材表（与 pipeline_jobs 一对多）
 
 设计原则：
   · 大文本字段（HTML / 转写文本）用 Text 类型
-  · JSON 结构（image_prompts / step data）用 JSON 类型（SQLite 以 TEXT 存储）
+  · JSON 结构（step data）用 JSON 类型（SQLite 以 TEXT 存储）
   · 枚举直接存字符串，无需 Enum 类型（便于跨数据库迁移）
   · 所有时间字段使用 DateTime(timezone=True)，UTC 存储
   · 外键关系在 Python 层用 relationship() 体现，级联删除
@@ -145,17 +144,17 @@ class PipelineJobModel(Base):
         Text, nullable=True,
         comment="AI 生成的正文 HTML（含图片占位符，由 Markdown 转换而来）",
     )
-    article_image_prompts: Mapped[list | None] = mapped_column(
-        JSON, nullable=True,
-        comment='图片 prompt 列表，格式：[{"id":"cover","prompt":"..."},...]',
-    )
-    generate_inline_images: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=True,
-        comment="是否生成文中插图（False=仅封面）",
-    )
-    skip_publish: Mapped[bool] = mapped_column(
+    skip_image_generation: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False,
-        comment="是否跳过发布草稿步骤（True=仅生成文章和HTML）",
+        comment="是否跳过封面图生成步骤",
+    )
+    article_image_prompts: Mapped[list | None] = mapped_column(
+        JSON, nullable=True, default=list,
+        comment="图片提示词列表 [{\"id\": \"cover\", \"prompt\": \"...\"}]",
+    )
+    cover_image_path: Mapped[str | None] = mapped_column(
+        String(512), nullable=True,
+        comment="生成的封面图本地路径",
     )
     text_model: Mapped[str | None] = mapped_column(
         String(64), nullable=True,
@@ -164,25 +163,6 @@ class PipelineJobModel(Base):
     topic: Mapped[str | None] = mapped_column(
         String(128), nullable=True,
         comment="用户指定的文章主题",
-    )
-
-    # ── Step 5：图片生成 & 微信素材上传 ──────────────────────────────────────
-    image_path: Mapped[str | None] = mapped_column(
-        String(512), nullable=True,
-        comment="封面图本地绝对路径（第一张生成图）",
-    )
-    image_model: Mapped[str | None] = mapped_column(
-        String(64), nullable=True,
-        comment="生成图片使用的 AI 模型名",
-    )
-    image_size: Mapped[str | None] = mapped_column(
-        String(16), nullable=True,
-        comment="生成图片尺寸，如 1664x928",
-    )
-    # 正文图片详情存在 wechat_image_assets 子表，这里只存聚合 JSON 作为缓存
-    wechat_image_map: Mapped[dict | None] = mapped_column(
-        JSON, nullable=True,
-        comment='正文图片映射缓存 {"img_01":{"local_path":"...","wechat_url":"...",...}}',
     )
 
     # ── Step 6：微信 HTML 转换 ────────────────────────────────────────────────
@@ -236,13 +216,6 @@ class PipelineJobModel(Base):
         back_populates="job",
         cascade="all, delete-orphan",   # 删除 job 时级联删除所有 steps
         order_by="PipelineStepModel.id",
-        lazy="select",
-    )
-    image_assets: Mapped[list["WechatImageAssetModel"]] = relationship(
-        "WechatImageAssetModel",
-        back_populates="job",
-        cascade="all, delete-orphan",
-        order_by="WechatImageAssetModel.id",
         lazy="select",
     )
 
@@ -338,105 +311,6 @@ class PipelineStepModel(Base):
         return (
             f"<PipelineStep job_id={self.job_id!r} "
             f"step={self.step!r} status={self.status!r}>"
-        )
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# 微信图片素材表
-# ══════════════════════════════════════════════════════════════════════════════
-
-class WechatImageAssetModel(Base):
-    """
-    正文图片素材记录表。
-    将 PipelineJob.wechat_image_map（JSON）拆成独立行，便于查询和复用。
-    每张图片占一行，包含本地路径、微信素材 URL、media_id。
-
-    注意：封面图（id=cover）也记录在此表，is_cover=True。
-    """
-    __tablename__ = "wechat_image_assets"
-
-    id: Mapped[int] = mapped_column(
-        Integer, primary_key=True, autoincrement=True,
-        comment="自增主键",
-    )
-    job_id: Mapped[str] = mapped_column(
-        String(36),
-        ForeignKey("pipeline_jobs.job_id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-        comment="关联的任务 UUID",
-    )
-
-    # ── 图片标识 ──────────────────────────────────────────────────────────────
-    img_id: Mapped[str] = mapped_column(
-        String(32), nullable=False,
-        comment="图片占位符 ID：cover / img_01 / img_02 ...",
-    )
-    is_cover: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False,
-        comment="是否为封面图（True=封面，作为草稿 thumb_media_id）",
-    )
-
-    # ── AI 生图 Prompt ────────────────────────────────────────────────────────
-    prompt: Mapped[str | None] = mapped_column(
-        Text, nullable=True,
-        comment="生成此图使用的 AI prompt",
-    )
-    image_model: Mapped[str | None] = mapped_column(
-        String(64), nullable=True,
-        comment="生成此图使用的模型名",
-    )
-    image_size: Mapped[str | None] = mapped_column(
-        String(16), nullable=True,
-        comment="生成尺寸，如 1664x928",
-    )
-
-    # ── 本地存储 ──────────────────────────────────────────────────────────────
-    local_path: Mapped[str | None] = mapped_column(
-        String(512), nullable=True,
-        comment="图片下载后的本地绝对路径",
-    )
-
-    # ── 微信素材库 ────────────────────────────────────────────────────────────
-    wechat_url: Mapped[str | None] = mapped_column(
-        String(512), nullable=True,
-        comment="上传微信素材库后返回的图片 URL（用于正文 <img src>）",
-    )
-    wechat_media_id: Mapped[str | None] = mapped_column(
-        String(64), nullable=True,
-        comment="上传微信素材库后返回的 media_id（封面图用此值）",
-    )
-    uploaded_to_wechat: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False,
-        comment="是否已成功上传到微信素材库",
-    )
-
-    # ── 时间戳 ────────────────────────────────────────────────────────────────
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        default=_now_utc,
-        server_default=func.now(),
-        comment="记录创建时间（UTC）",
-    )
-
-    # ── 关系 ──────────────────────────────────────────────────────────────────
-    job: Mapped["PipelineJobModel"] = relationship(
-        "PipelineJobModel",
-        back_populates="image_assets",
-    )
-
-    # ── 索引 ──────────────────────────────────────────────────────────────────
-    __table_args__ = (
-        Index("ix_wechat_image_assets_job_img", "job_id", "img_id"),
-        Index("ix_wechat_image_assets_cover", "job_id", "is_cover"),
-        {"mysql_engine": "InnoDB", "mysql_charset": "utf8mb4", "mysql_collate": "utf8mb4_unicode_ci"},
-    )
-
-    def __repr__(self) -> str:
-        return (
-            f"<WechatImageAsset job_id={self.job_id!r} "
-            f"img_id={self.img_id!r} cover={self.is_cover}>"
         )
 
 
@@ -541,6 +415,10 @@ class KnowledgeDocumentModel(Base):
         String(512), nullable=True,
         comment="原始文件路径（PDF 等上传文件）",
     )
+    vector_doc_id: Mapped[str | None] = mapped_column(
+        String(64), nullable=True,
+        comment="ChromaDB 中用于标识该文档分块的 doc_id",
+    )
     chunk_count: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0,
         comment="文档分块数量",
@@ -579,3 +457,118 @@ class KnowledgeDocumentModel(Base):
 
     def __repr__(self) -> str:
         return f"<KnowledgeDocument title={self.title!r} status={self.status!r}>"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 智能写作任务表
+# ══════════════════════════════════════════════════════════════════════════════
+
+class ContentTaskModel(Base):
+    """
+    智能写作任务表（用于 Step 4 重构）。
+    结合 LangGraph + RAG + MySQL 的深度文章生成系统。
+    """
+    __tablename__ = "content_tasks"
+
+    # ── 主键 ──────────────────────────────────────────────────────────────────
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True,
+        comment="自增主键",
+    )
+    task_id: Mapped[str] = mapped_column(
+        String(36), unique=True, nullable=False, index=True,
+        comment="UUID 任务 ID",
+    )
+
+    # ── 关联 ──────────────────────────────────────────────────────────────────
+    pipeline_job_id: Mapped[str | None] = mapped_column(
+        String(36), nullable=True,
+        comment="关联的 pipeline 任务 ID（可选）",
+    )
+
+    # ── 任务状态 ──────────────────────────────────────────────────────────────
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="pending",
+        comment="任务状态：pending / processing / completed / failed",
+    )
+    retry_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0,
+        comment="重试次数",
+    )
+    error: Mapped[str | None] = mapped_column(
+        Text, nullable=True,
+        comment="失败时的错误信息",
+    )
+
+    # ── 输入 ──────────────────────────────────────────────────────────────────
+    raw_transcript: Mapped[str | None] = mapped_column(
+        Text, nullable=True,
+        comment="原始转写文本（Step 3 输入）",
+    )
+    rag_collection: Mapped[str | None] = mapped_column(
+        String(128), nullable=True,
+        comment="使用的 RAG 知识库集合名称",
+    )
+    rag_embedding_model: Mapped[str | None] = mapped_column(
+        String(128), nullable=True,
+        comment="用户选择的向量模型名，留空使用 config 默认值",
+    )
+    rag_embedding_provider: Mapped[str | None] = mapped_column(
+        String(32), nullable=True,
+        comment="向量模型服务商 (siliconflow/zhipu)，留空使用 config 默认值",
+    )
+    rag_embedding_api_key: Mapped[str | None] = mapped_column(
+        String(256), nullable=True,
+        comment="向量模型专用 API Key，留空使用主 api_key",
+    )
+
+    # ── 中间产物 ──────────────────────────────────────────────────────────────
+    article_outline: Mapped[str | None] = mapped_column(
+        Text, nullable=True,
+        comment="AI 生成的文章大纲（节点 A 输出）",
+    )
+    knowledge_context: Mapped[str | None] = mapped_column(
+        Text, nullable=True,
+        comment="RAG 检索到的知识背景（节点 A 输出）",
+    )
+
+    # ── 最终输出 ──────────────────────────────────────────────────────────────
+    article_final: Mapped[str | None] = mapped_column(
+        Text, nullable=True,
+        comment="最终 Markdown 文章（节点 B 输出）",
+    )
+    article_title: Mapped[str | None] = mapped_column(
+        String(255), nullable=True,
+        comment="文章标题",
+    )
+    image_prompt: Mapped[str | None] = mapped_column(
+        Text, nullable=True,
+        comment="封面图提示词（节点 B 输出）",
+    )
+
+    # ── 时间戳 ──────────────────────────────────────────────────────────────
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=_now_utc,
+        server_default=func.now(),
+        comment="任务创建时间（UTC）",
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=_now_utc,
+        onupdate=_now_utc,
+        server_default=func.now(),
+        comment="最后更新时间（UTC）",
+    )
+
+    # ── 索引 ──────────────────────────────────────────────────────────────────
+    __table_args__ = (
+        Index("ix_content_tasks_status", "status"),
+        Index("ix_content_tasks_created_at", "created_at"),
+        {"mysql_engine": "InnoDB", "mysql_charset": "utf8mb4", "mysql_collate": "utf8mb4_unicode_ci"},
+    )
+
+    def __repr__(self) -> str:
+        return f"<ContentTask task_id={self.task_id!r} status={self.status!r}>"

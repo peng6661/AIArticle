@@ -287,11 +287,30 @@ def ensure_database_schema() -> None:
             "ALTER TABLE pipeline_jobs ADD COLUMN article_body_markdown TEXT NULL"
             " COMMENT 'AI 生成的正文 Markdown（含图片占位符）'"
         )
-    if "skip_publish" not in existing_columns:
+    if "skip_image_generation" not in existing_columns:
         alter_statements.append(
-            "ALTER TABLE pipeline_jobs ADD COLUMN skip_publish BOOLEAN NOT NULL DEFAULT 0"
-            " COMMENT '是否跳过发布草稿步骤（True=仅生成文章和HTML）'"
+            "ALTER TABLE pipeline_jobs ADD COLUMN skip_image_generation BOOLEAN NOT NULL DEFAULT 0"
+            " COMMENT '是否跳过封面图生成步骤'"
         )
+    if "article_image_prompts" not in existing_columns:
+        alter_statements.append(
+            "ALTER TABLE pipeline_jobs ADD COLUMN article_image_prompts JSON NULL"
+            " COMMENT '图片提示词列表'"
+        )
+    if "cover_image_path" not in existing_columns:
+        alter_statements.append(
+            "ALTER TABLE pipeline_jobs ADD COLUMN cover_image_path VARCHAR(512) NULL"
+            " COMMENT '生成的封面图本地路径'"
+        )
+    if "knowledge_documents" in inspector.get_table_names():
+        knowledge_columns = {
+            column["name"] for column in inspector.get_columns("knowledge_documents")
+        }
+        if "vector_doc_id" not in knowledge_columns:
+            alter_statements.append(
+                "ALTER TABLE knowledge_documents ADD COLUMN vector_doc_id VARCHAR(64) NULL"
+                " COMMENT 'ChromaDB 中用于标识该文档分块的 doc_id'"
+            )
 
     if not alter_statements:
         return

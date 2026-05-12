@@ -37,6 +37,27 @@ def detect_platform(share_text: str) -> str:
     return "unknown"
 
 
+def sanitize_filename(filename: str, max_length: int = 80) -> str:
+    """
+    清洗文件名，移除所有 Windows 不支持的字符和控制字符。
+    保留：字母、数字、中文、下划线、短横线、点号、空格（会转为下划线）。
+    """
+    # 1. 移除控制字符（\x00-\x1f，包含 \n \r \t 等）
+    name = re.sub(r'[\x00-\x1f]', '', filename)
+    # 2. 替换 Windows 非法字符
+    name = re.sub(r'[\\/:*?"<>|]', '_', name)
+    # 3. 移除特殊 Unicode 符号（箭头、表情等），只保留常见字符
+    #    \w 包含字母数字和下划线，\u4e00-\u9fff 是中日韩统一表意文字
+    name = re.sub(r'[^\w\s\-_.，。！!、（）()\[\]{}【】\u4e00-\u9fff]', '_', name, flags=re.UNICODE)
+    # 4. 空白字符统一替换为下划线
+    name = re.sub(r'\s+', '_', name)
+    # 5. 多个连续下划线合并为一个
+    name = re.sub(r'_+', '_', name)
+    # 6. 去除首尾下划线
+    name = name.strip('_')
+    return name[:max_length]
+
+
 def download_video_from_url(video_url: str, save_dir: Path, filename: str, platform: str = "") -> Path:
     """
     通用视频下载：从直链下载到本地文件。
@@ -46,7 +67,7 @@ def download_video_from_url(video_url: str, save_dir: Path, filename: str, platf
     from app.api.video_router import build_download_headers
 
     save_dir.mkdir(parents=True, exist_ok=True)
-    safe_name = re.sub(r'[\\/:*?"<>|]', '_', filename)[:80]
+    safe_name = sanitize_filename(filename)
     if not safe_name.endswith(".mp4"):
         safe_name += ".mp4"
     dest = save_dir / safe_name
@@ -70,7 +91,7 @@ def download_image_from_url(image_url: str, save_dir: Path, filename: str) -> Pa
     import requests
 
     save_dir.mkdir(parents=True, exist_ok=True)
-    safe_name = re.sub(r'[\\/:*?"<>|]', '_', filename)[:80]
+    safe_name = sanitize_filename(filename)
     if not safe_name.lower().endswith((".jpg", ".jpeg", ".png")):
         safe_name += ".jpg"
     dest = save_dir / safe_name

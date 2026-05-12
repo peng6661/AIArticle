@@ -5,8 +5,6 @@
 from __future__ import annotations
 
 import importlib
-import subprocess
-import sys
 from pathlib import Path
 
 from app.core.config import get_settings
@@ -42,12 +40,7 @@ def _ensure_faster_whisper():
     try:
         return importlib.import_module("faster_whisper")
     except ImportError:
-        print("未检测到依赖 faster-whisper，正在自动安装...")
-        subprocess.run(
-            [sys.executable, "-m", "pip", "install", "faster-whisper"],
-            check=True,
-        )
-        return importlib.import_module("faster_whisper")
+        raise ImportError("未检测到依赖 faster-whisper；请先执行 pip install -r requirements.txt")
 
 
 def transcribe_audio(

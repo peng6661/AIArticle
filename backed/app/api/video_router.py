@@ -600,20 +600,24 @@ async def get_youtube_metadata(url: str):
 async def cancel_youtube_download(download_id: str):
     """
     取消指定的 YouTube 下载任务。
-    
+
     设置 cancel_event 标志，yt-dlp 进度钩子会检测到并抛出异常终止下载。
     """
     ctx = _get_yt_context(download_id)
     if not ctx:
         return {"success": True, "message": "任务不存在或已结束"}
-    
+
     # 设置取消标志
     ctx.cancel_event.set()
-    
+
     # 清理上下文
     _unregister_yt_context(download_id)
-    
+
     return {"success": True, "message": "取消成功"}
+
+
+
+
 
 
 

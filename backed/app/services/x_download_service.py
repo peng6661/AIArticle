@@ -22,6 +22,7 @@ from typing import Optional, Generator
 from curl_cffi import requests as cffi_requests
 
 from app.services.base import BaseExtractor
+from app.api._pipeline_utils import sanitize_filename
 
 
 class XVideoExtractor(BaseExtractor):
@@ -348,15 +349,15 @@ class XVideoExtractor(BaseExtractor):
         # 方案 A：使用 CDNL 直接下载
         if video_url:
             try:
-                safe_title = re.sub(r'[\\/:*?"<>|]', '_', 
-                    media_data.get("title", "x_media"))[:80]
-                
+                safe_title = sanitize_filename(
+                    media_data.get("title", "x_media"))
+
                 ext = ".mp4"
                 content_type = ""
-                
+
                 # 先 HEAD 探测文件名和大小
                 head_resp = self.session.head(
-                    video_url, 
+                    video_url,
                     headers={"Referer": "https://x.com/"},
                     timeout=15,
                 )
@@ -364,8 +365,8 @@ class XVideoExtractor(BaseExtractor):
                 if "filename=" in ct_header:
                     fn_match = re.search(r'filename="?([^";\n]+)"?', ct_header)
                     if fn_match:
-                        safe_title = re.sub(r'[\\/:*?"<>|]', '_', fn_match.group(1))[:80]
-                
+                        safe_title = sanitize_filename(fn_match.group(1))
+
                 output_path = output_dir / f"{safe_title}{ext}"
                 
                 resp = self.session.get(
@@ -468,8 +469,8 @@ class XVideoExtractor(BaseExtractor):
             import yt_dlp
 
             output_dir = Path(save_dir)
-            safe_title = re.sub(r'[\\/:*?"<>|]', '_', 
-                media_data.get("title", "X_media"))[:80]
+            safe_title = sanitize_filename(
+                media_data.get("title", "X_media"))
             output_template = str(output_dir / f"{safe_title}.%(ext)s")
 
             opts = {

@@ -127,7 +127,7 @@ AIArticle/
 - Python 3.11+
 - Node.js 18+
 - MySQL 8.0+
-- FFmpeg（音频提取需要，imageio-ffmpeg 会自动安装）
+- FFmpeg（音频提取需要；也可使用 requirements 中的 imageio-ffmpeg 兜底）
 - CUDA（可选，加速语音转写）
 - Node.js（YouTube 下载 PO Token 生成需要）
 
@@ -231,8 +231,6 @@ npm run dev
 | `POST` | `/pipeline/step/download` | Step1: 下载视频 |
 | `POST` | `/pipeline/step/extract_audio` | Step2: 提取音频 |
 | `POST` | `/pipeline/step/transcribe` | Step3: 语音转写 |
-| `POST` | `/pipeline/step/generate_article` | Step4: AI 生成文章 |
-| `POST` | `/pipeline/step/generate_image` | Step5: 生成配图 |
 | `POST` | `/pipeline/step/convert_html` | Step6: HTML 清洗 |
 | `POST` | `/pipeline/step/publish_draft` | Step7: 发布微信草稿 |
 | `GET` | `/pipeline/jobs/{job_id}` | 查询任务进度 |

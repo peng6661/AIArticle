@@ -3,41 +3,9 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { ChevronDown, ChevronUp, Settings } from "lucide-react";
 import { taskApi, KnowledgeCollection, KnowledgeDocument } from "@/lib/tasks-api";
-import { STORAGE_KEY_API, STORAGE_KEY_RAG_EMBEDDING_MODEL, STORAGE_KEY_RAG_EMBEDDING_PROVIDER, STORAGE_KEY_RAG_EMBEDDING_API_KEY } from "@/lib/task-settings";
+import { STORAGE_KEY_API, STORAGE_KEY_SILICONFLOW_API_KEY, STORAGE_KEY_ZHIPU_API_KEY, STORAGE_KEY_RAG_EMBEDDING_MODEL, STORAGE_KEY_RAG_EMBEDDING_PROVIDER, STORAGE_KEY_RAG_EMBEDDING_API_KEY } from "@/lib/task-settings";
 import Navbar from "@/components/navbar";
-
-function VideoBackground() {
-  const videoRef = useRef<HTMLVideoElement>(null);
-
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video) return;
-    const playPromise = video.play();
-    if (playPromise !== undefined) {
-      playPromise.catch(() => {
-        video.muted = true;
-        video.play().catch(() => {});
-      });
-    }
-  }, []);
-
-  return (
-    <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden">
-      <video
-        ref={videoRef}
-        autoPlay
-        loop
-        muted
-        playsInline
-        poster="/homeScreen01.webm"
-        className="h-full w-full object-cover"
-      >
-        <source src="/homeScreen01.webm" type="video/webm" />
-      </video>
-      <div className="absolute inset-0 bg-black/30" />
-    </div>
-  );
-}
+import VideoBackground from "@/components/video-background";
 
 export default function KnowledgePage() {
   const [collections, setCollections] = useState<KnowledgeCollection[]>([]);
@@ -91,7 +59,11 @@ export default function KnowledgePage() {
   const updateEmbeddingApiKey = (v: string) => { setEmbeddingApiKey(v); localStorage.setItem(STORAGE_KEY_RAG_EMBEDDING_API_KEY, v); };
 
   // 入库时使用向量模型配置的 API Key，未配置则回退到主页的 LLM API Key
-  const apiKey = embeddingApiKey || (typeof window !== "undefined" ? localStorage.getItem(STORAGE_KEY_API) || "" : "");
+  const apiKey = embeddingApiKey || (typeof window !== "undefined"
+    ? (embeddingProvider === "zhipu"
+        ? localStorage.getItem(STORAGE_KEY_ZHIPU_API_KEY) || localStorage.getItem(STORAGE_KEY_API) || ""
+        : localStorage.getItem(STORAGE_KEY_SILICONFLOW_API_KEY) || localStorage.getItem(STORAGE_KEY_API) || "")
+    : "");
 
   const fetchCollections = useCallback(async () => {
     try {

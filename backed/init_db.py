@@ -42,7 +42,6 @@ from app.core.config import get_settings                        # noqa: E402
 from app.db.models import (                                     # noqa: E402, F401
     PipelineJobModel,
     PipelineStepModel,
-    WechatImageAssetModel,
 )
 
 

@@ -8,13 +8,17 @@
 """
 from __future__ import annotations
 
+import io
 import json
 import mimetypes
+import os
 import re
+import tempfile
 import webbrowser
 from pathlib import Path
 
 import requests
+from PIL import Image
 
 from app.core.config import get_settings
 
@@ -163,18 +167,18 @@ def add_draft(
 ) -> dict:
     cfg = get_settings()
     url = f"{cfg.wechat_api_base}/cgi-bin/draft/add?access_token={access_token}"
-    payload = {
-        "articles": [{
-            "title": title,
-            "author": author or cfg.wechat_default_author,
-            "digest": digest or cfg.wechat_default_digest,
-            "content": content_html,
-            "content_source_url": content_source_url or cfg.wechat_default_content_source_url,
-            "thumb_media_id": thumb_media_id,
-            "need_open_comment": need_open_comment if need_open_comment is not None else cfg.wechat_need_open_comment,
-            "only_fans_can_comment": only_fans_can_comment if only_fans_can_comment is not None else cfg.wechat_only_fans_can_comment,
-        }]
+    article = {
+        "title": title,
+        "author": author or cfg.wechat_default_author,
+        "digest": digest or cfg.wechat_default_digest,
+        "content": content_html,
+        "content_source_url": content_source_url or cfg.wechat_default_content_source_url,
+        "need_open_comment": need_open_comment if need_open_comment is not None else cfg.wechat_need_open_comment,
+        "only_fans_can_comment": only_fans_can_comment if only_fans_can_comment is not None else cfg.wechat_only_fans_can_comment,
     }
+    if thumb_media_id:
+        article["thumb_media_id"] = thumb_media_id
+    payload = {"articles": [article]}
     headers = {"Content-Type": "application/json; charset=utf-8"}
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     resp = requests.post(url, data=body, headers=headers, timeout=60)
@@ -200,13 +204,34 @@ def get_draft(access_token: str, media_id: str) -> dict:
     return data
 
 
+# ── 默认占位封面生成 ────────────────────────────────────────────────────────────
+
+def _generate_placeholder_cover() -> Path:
+    """生成一张纯色占位封面图（300×168，微信 thumb 推荐比例），返回临时文件路径。"""
+    img = Image.new("RGB", (300, 168), color=(200, 200, 200))
+    # 在中央画一条斜线装饰，避免完全纯色被微信误判为无效图片
+    from PIL import ImageDraw
+    draw = ImageDraw.Draw(img)
+    draw.line((0, 0, 300, 168), fill=(180, 180, 180), width=2)
+    draw.line((300, 0, 0, 168), fill=(180, 180, 180), width=2)
+    # 写 "AI" 标记
+    try:
+        draw.text((230, 10), "AI", fill=(160, 160, 160))
+    except Exception:
+        pass
+    fd, path = tempfile.mkstemp(suffix=".png")
+    os.close(fd)
+    img.save(path, "PNG")
+    return Path(path)
+
+
 # ── 主流程：发布草稿 ──────────────────────────────────────────────────────────
 
 def publish_draft(
     appid: str,
     appsecret: str,
     content_html: str,          # 已替换图片占位符的最终正文 HTML
-    cover_image_path: Path,     # 封面图本地路径（上传为 thumb 素材）
+    cover_image_path: Path | None,     # 封面图本地路径（上传为 thumb 素材），可为 None
     title: str | None = None,
     author: str | None = None,
     digest: str | None = None,
@@ -239,7 +264,13 @@ def publish_draft(
 
     # ── 微信接口调用 ──────────────────────────────────────────────────────────
     access_token = get_access_token(appid, appsecret)
-    thumb_media_id = upload_cover_image(access_token, cover_image_path)
+    if cover_image_path is not None:
+        thumb_media_id = upload_cover_image(access_token, cover_image_path)
+    else:
+        # 没有封面图时，生成一张默认占位图并上传（微信草稿 API 要求 thumb_media_id 为必填）
+        placeholder = _generate_placeholder_cover()
+        thumb_media_id = upload_cover_image(access_token, placeholder)
+        placeholder.unlink(missing_ok=True)
 
     result = add_draft(
         access_token=access_token,

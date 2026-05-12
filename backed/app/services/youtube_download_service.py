@@ -4,14 +4,10 @@ YouTube视频解析服务
 重要：YouTube 视频的 CDN 直链有时效性（几秒~几分钟），不能像其他平台那样
 先提取直链再用 requests 下载。必须用 yt-dlp 自身的下载功能直接保存到本地。
 
-【新版 yt-dlp (2026+) 说明】
-yt-dlp 新版需要 JavaScript Runtime（node/deno/bun）来生成 PO Token，
-否则 YouTube 会以机器人验证拦截请求。
-同时 cookies 是必须的（YouTube 要求登录验证）。
-建议：
+【使用说明】
 1. 用浏览器扩展（如 "Get cookies.txt LOCALLY"）导出 cookies 文件
 2. 放到 backed/cookies_youtube.txt
-3. 在 config.yaml 中配置 youtube.cookies_source: file
+3. 确保 Chrome 已登录 YouTube 账号
 """
 import yt_dlp
 import asyncio
@@ -20,7 +16,6 @@ import queue
 import shutil
 import re
 import tempfile
-import http.cookiejar
 from pathlib import Path
 from typing import Optional, AsyncIterator, Dict, Any
 from dataclasses import dataclass, field
@@ -70,37 +65,15 @@ def _get_js_runtime_opts() -> dict:
         return {}
 
 
-def _get_chrome_cookies_via_browser_cookie3() -> Optional[http.cookiejar.CookieJar]:
-    """
-    使用 browser_cookie3 库直接读取 Chrome 的 cookies。
-    绕过 yt-dlp 的 DPAPI 解密问题（仅在 browser_cookie3 安装时可用）。
-    """
-    try:
-        import browser_cookie3
-        cj = browser_cookie3.chrome(domain_name=".youtube.com")
-        print(f"[YouTube] 成功通过 browser_cookie3 读取 Chrome cookies")
-        return cj
-    except ImportError:
-        print(f"[YouTube] browser_cookie3 未安装")
-        return None
-    except Exception as e:
-        print(f"[YouTube] browser_cookie3 读取 Chrome cookies 失败: {e}")
-        return None
-
-
 def _get_youtube_cookies_opts() -> dict:
     """
     根据配置返回 yt-dlp 的 cookies 相关选项。
 
-    支持三种模式：
-    1. file  - 从 Netscape 格式的 cookies.txt 文件读取（推荐）
-    2. browser + chrome - 先尝试 browser_cookie3 直接读取（绕过 DPAPI），失败则回退 yt-dlp 内置方式
-    3. browser + 其他  - 使用 yt-dlp 内置的 cookiesfrombrowser
-    4. none  - 不使用 cookies（部分公开视频可能可以，但大多数会被拦截）
+    仅支持 file 模式：从 Netscape 格式的 cookies.txt 文件读取。
+    请使用浏览器扩展（如 "Get cookies.txt LOCALLY"）手动导出 cookie 文件。
     """
     settings = get_settings()
     cookies_opts = {}
-
     cookies_source = settings.youtube_cookies_source
 
     if cookies_source == "none":
@@ -114,31 +87,21 @@ def _get_youtube_cookies_opts() -> dict:
             cookies_path = Path(cookies_file)
             if not cookies_path.is_absolute():
                 cookies_path = _BACKED_DIR / cookies_file
+
             if cookies_path.exists():
                 cookies_opts["cookiefile"] = str(cookies_path)
                 print(f"[YouTube] 使用 cookies 文件: {cookies_path}")
             else:
                 print(f"[YouTube] 警告: cookies 文件不存在: {cookies_path}")
-                print(f"[YouTube] 请参考说明导出 cookies 文件到: {cookies_path}")
+                print(f"[YouTube] 请使用 'Get cookies.txt LOCALLY' Chrome 扩展导出 cookie")
         else:
             print("[YouTube] 警告: cookies_source=file 但未配置 cookies_file 路径")
 
     elif cookies_source == "browser":
         browser = settings.youtube_browser
-
-        if browser == "chrome":
-            # Chrome 在 Windows 上有 DPAPI/App-Bound Encryption 问题，先尝试 browser_cookie3
-            cj = _get_chrome_cookies_via_browser_cookie3()
-            if cj:
-                cookies_opts["cookiejar"] = cj
-            else:
-                print("[YouTube] 警告: 无法读取 Chrome cookies（DPAPI/App-Bound Encryption 限制）")
-                print("[YouTube] 建议改用 cookies 文件方式，参考 README 导出 cookies.txt")
-                cookies_opts["cookiesfrombrowser"] = (browser,)
-        else:
-            # 其他浏览器（edge/firefox等）使用 yt-dlp 内置方式
-            cookies_opts["cookiesfrombrowser"] = (browser,)
-            print(f"[YouTube] 使用浏览器 cookies: {browser}")
+        # 使用 yt-dlp 内置的 cookiesfrombrowser
+        cookies_opts["cookiesfrombrowser"] = (browser,)
+        print(f"[YouTube] 使用浏览器 cookies: {browser}")
 
     return cookies_opts
 

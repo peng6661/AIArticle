@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { Search, TrendingUp, Play, Heart, MessageCircle, Download } from "lucide-react";
 import Navbar from "@/components/navbar";
+import VideoBackground from "@/components/video-background";
 import { taskApi, VideoSearchResult } from "@/lib/tasks-api";
 
 // ─── 后端 API 基础地址 ──────────────────────────────────────
@@ -57,40 +58,6 @@ const INITIAL_DOWNLOAD_STATE: DownloadState = {
   batchTotal: 0,
 };
 
-function VideoBackground() {
-  const videoRef = useRef<HTMLVideoElement>(null);
-
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video) return;
-
-    const playPromise = video.play();
-    if (playPromise !== undefined) {
-      playPromise.catch(() => {
-        video.muted = true;
-        video.play().catch(() => {});
-      });
-    }
-  }, []);
-
-  return (
-    <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden">
-      <video
-        ref={videoRef}
-        autoPlay
-        loop
-        muted
-        playsInline
-        poster="/homeScreen01.webm"
-        className="h-full w-full object-cover"
-      >
-        <source src="/homeScreen01.webm" type="video/webm" />
-      </video>
-      <div className="absolute inset-0 bg-black/30" />
-    </div>
-  );
-}
-
 export default function DownloadPage() {
   const [url, setUrl] = useState("");
   const [loading, setLoading] = useState(false);
@@ -129,8 +96,6 @@ export default function DownloadPage() {
   const PLATFORM_MAP: Record<string, { name: string; color: string; icon: string }> = {
     bilibili:  { name: "B站",      color: "#ec4899", icon: "📺" },
     youtube:   { name: "YouTube",  color: "#ef4444", icon: "▶️" },
-    kuaishou:  { name: "快手",     color: "#ff6600", icon: "📱" },
-    instagram: { name: "Instagram", color: "#e1306c", icon: "📷" },
   };
 
   const togglePlatform = (pid: string) => {

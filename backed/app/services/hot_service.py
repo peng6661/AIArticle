@@ -228,6 +228,9 @@ def _fetch_zhihu(session: requests.Session) -> HotBoard:
         if not title:
             continue
         url = target.get("url", "")
+        if url and url.startswith("https://api.zhihu.com"):
+            m = re.search(r"/(\d+)$", url)
+            url = f"https://www.zhihu.com/question/{m.group(1)}" if m else ""
         if not url:
             qid = target.get("id", "")
             url = f"https://www.zhihu.com/question/{qid}" if qid else ""
@@ -339,6 +342,104 @@ def _fetch_newsnow(session: requests.Session, source_id: str, title: str, accent
     )
 
 
+# ── AI HOT 日报 ─────────────────────────────────────────────────────────────
+
+def _fetch_aihot_daily(session: requests.Session) -> HotBoard:
+    """从 aihot.virxact.com/daily 爬取当日 AI 日报文章。"""
+    resp = session.get(
+        "https://aihot.virxact.com/daily",
+        headers={"Accept": "text/html"},
+        timeout=20,
+    )
+    resp.raise_for_status()
+    soup = BeautifulSoup(resp.text, "html.parser")
+
+    entries = []
+    for article in soup.select("article.daily-article"):
+        title_el = article.select_one(".daily-article-title a")
+        if not title_el:
+            continue
+        title = _clean_text(title_el.get_text())
+        url = (title_el.get("href") or "").strip()
+        if not title or not url:
+            continue
+
+        # 信源标签 + 信源名称
+        source_parts = []
+        for tag_el in article.select(".daily-article-source .role-tag"):
+            source_parts.append(_clean_text(tag_el.get_text()))
+        source_name_el = article.select_one(".daily-article-source span:last-child")
+        if source_name_el:
+            source_parts.append(_clean_text(source_name_el.get_text()))
+        source = " · ".join(source_parts) if source_parts else ""
+
+        # 摘要（取前 60 字作为 score 字段展示）
+        summary_el = article.select_one(".daily-article-summary")
+        summary = _clean_text(summary_el.get_text())[:60] if summary_el else ""
+
+        entries.append(HotEntry(
+            rank=len(entries) + 1, title=title, article_url=url,
+            score=summary, source=source,
+        ))
+        if len(entries) >= 30:
+            break
+
+    if not entries:
+        raise ValueError("AI HOT 日报: 无数据")
+    return HotBoard(
+        id="aihot_daily", title="AI HOT 日报",
+        source_url="https://aihot.virxact.com/daily",
+        accent="#f59e0b", updated_at=datetime.now().isoformat(), entries=entries,
+    )
+
+
+# ── AI HOT 精选 ─────────────────────────────────────────────────────────────
+
+def _fetch_aihot_feed(session: requests.Session) -> HotBoard:
+    """从 aihot.virxact.com/feed.xml 爬取 AI 精选文章。"""
+    import xml.etree.ElementTree as ET
+
+    resp = session.get(
+        "https://aihot.virxact.com/feed.xml",
+        headers={"Accept": "application/rss+xml, application/xml, text/xml"},
+        timeout=20,
+    )
+    resp.raise_for_status()
+    root = ET.fromstring(resp.text)
+
+    ns = {"atom": "http://www.w3.org/2005/Atom"}
+    channel = root.find("channel")
+    if channel is None:
+        raise ValueError("AI HOT 精选: RSS 格式异常")
+
+    entries = []
+    for item in channel.findall("item"):
+        title = _clean_text(item.findtext("title", ""))
+        url = (item.findtext("link") or "").strip()
+        if not title or not url:
+            continue
+        description = _clean_text(item.findtext("description", ""))[:60]
+        author = _clean_text(item.findtext("author", ""))
+        # author 格式通常是 "noreply@... (来源名)"，提取括号内来源
+        m = re.search(r"\(([^)]+)\)", author)
+        source = m.group(1) if m else author
+
+        entries.append(HotEntry(
+            rank=len(entries) + 1, title=title, article_url=url,
+            score=description, source=source,
+        ))
+        if len(entries) >= 30:
+            break
+
+    if not entries:
+        raise ValueError("AI HOT 精选: 无数据")
+    return HotBoard(
+        id="aihot_feed", title="AI HOT 精选",
+        source_url="https://aihot.virxact.com/feed.xml",
+        accent="#06b6d4", updated_at=datetime.now().isoformat(), entries=entries,
+    )
+
+
 def _serialize_board(board: HotBoard) -> dict:
     payload = asdict(board)
     payload["entries"] = [asdict(entry) for entry in board.entries]
@@ -356,7 +457,9 @@ BOARD_FETCHERS = [
     {"id": "wechat",   "title": "微信热文",     "fetch": _fetch_wechat},
     {"id": "github",   "title": "GitHub 热榜",  "fetch": _fetch_github},
     {"id": "juejin",   "title": "稀土掘金",     "fetch": lambda s: _fetch_newsnow(s, "juejin", "稀土掘金", "#1e80ff")},
-    {"id": "nowcoder", "title": "牛客热榜",     "fetch": _fetch_nowcoder},
+    {"id": "nowcoder",    "title": "牛客热榜",     "fetch": _fetch_nowcoder},
+    {"id": "aihot_daily", "title": "AI HOT 日报",  "fetch": _fetch_aihot_daily},
+    {"id": "aihot_feed",  "title": "AI HOT 精选",  "fetch": _fetch_aihot_feed},
 ]
 
 
