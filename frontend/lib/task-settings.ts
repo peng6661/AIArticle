@@ -30,6 +30,7 @@ export interface RetryCredentials {
   imageApiKey: string;
   imageModel: string;
   ragCollection: string;
+  ragTopK: number;
   ragEmbeddingModel: string;
   ragEmbeddingProvider: string;
   ragEmbeddingApiKey: string;
@@ -47,6 +48,7 @@ export function readStoredRetrySettings() {
       imageApiKey: "",
       imageModel: "",
       ragCollection: "",
+      ragTopK: 5,
       ragEmbeddingModel: "",
       ragEmbeddingProvider: "",
       ragEmbeddingApiKey: "",
@@ -88,6 +90,7 @@ export function readStoredRetrySettings() {
       ? localStorage.getItem(STORAGE_KEY_ZHIPU_IMAGE_MODEL) || localStorage.getItem(STORAGE_KEY_IMAGE_MODEL) || ""
       : localStorage.getItem(STORAGE_KEY_SILICONFLOW_IMAGE_MODEL) || localStorage.getItem(STORAGE_KEY_IMAGE_MODEL) || "",
     ragCollection: localStorage.getItem(STORAGE_KEY_RAG_COLLECTION) || "",
+    ragTopK: parseInt(localStorage.getItem(STORAGE_KEY_RAG_TOP_K) || "5", 10),
     ragEmbeddingModel: localStorage.getItem(STORAGE_KEY_RAG_EMBEDDING_MODEL) || "",
     ragEmbeddingProvider: localStorage.getItem(STORAGE_KEY_RAG_EMBEDDING_PROVIDER) || "",
     ragEmbeddingApiKey: localStorage.getItem(STORAGE_KEY_RAG_EMBEDDING_API_KEY) || "",

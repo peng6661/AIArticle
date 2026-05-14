@@ -509,6 +509,10 @@ class ContentTaskModel(Base):
         String(128), nullable=True,
         comment="使用的 RAG 知识库集合名称",
     )
+    rag_top_k: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=5,
+        comment="RAG 检索返回的相关块数量",
+    )
     rag_embedding_model: Mapped[str | None] = mapped_column(
         String(128), nullable=True,
         comment="用户选择的向量模型名，留空使用 config 默认值",

@@ -209,13 +209,14 @@ def _retrieve_knowledge(transcript: str, task_id: str, api_key: str) -> str:
         emb_model = task.get("rag_embedding_model") or None
         emb_provider = task.get("rag_embedding_provider") or None
         emb_api_key = task.get("rag_embedding_api_key") or cfg.rag_embedding_api_key or None
+        top_k = int(task.get("rag_top_k") or cfg.rag_top_k)
 
         rag = RagService()
         context = rag.retrieve_context(
             collection_name=rag_collection,
             query_text=transcript[:2000],
             api_key=api_key,
-            top_k=cfg.rag_top_k,
+            top_k=top_k,
             embedding_model=emb_model,
             embedding_provider=emb_provider,
             embedding_api_key=emb_api_key,
@@ -539,6 +540,7 @@ def create_content_task(
     pipeline_job_id: str,
     transcript: str,
     rag_collection: str | None = None,
+    rag_top_k: int | None = None,
     rag_embedding_model: str | None = None,
     rag_embedding_provider: str | None = None,
     rag_embedding_api_key: str | None = None,
@@ -565,6 +567,7 @@ def create_content_task(
             status="pending",
             raw_transcript=transcript,
             rag_collection=rag_collection or "",
+            rag_top_k=rag_top_k or get_settings().rag_top_k,
             rag_embedding_model=rag_embedding_model or None,
             rag_embedding_provider=rag_embedding_provider or None,
             rag_embedding_api_key=rag_embedding_api_key or None,
@@ -589,6 +592,7 @@ def get_content_task(task_id: str) -> dict | None:
             "task_id": task.task_id,
             "status": task.status,
             "rag_collection": task.rag_collection or "",
+            "rag_top_k": task.rag_top_k or get_settings().rag_top_k,
             "rag_embedding_model": task.rag_embedding_model or "",
             "rag_embedding_provider": task.rag_embedding_provider or "",
             "rag_embedding_api_key": task.rag_embedding_api_key or "",

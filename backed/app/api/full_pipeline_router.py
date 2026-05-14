@@ -306,6 +306,7 @@ def _run_full_pipeline_bg(job_id: str, req: FullPipelineRequest):
             pipeline_job_id=job_id,
             transcript=job.transcript_text,
             rag_collection=req.rag_collection or None,
+            rag_top_k=req.rag_top_k,
             rag_embedding_model=req.rag_embedding_model or None,
             rag_embedding_provider=req.rag_embedding_provider or None,
             rag_embedding_api_key=req.rag_embedding_api_key or None,
@@ -434,10 +435,12 @@ def _run_full_pipeline_bg(job_id: str, req: FullPipelineRequest):
             return
         raise
     try:
-        html = job.article_body_html
+        markdown = job.article_body_markdown
+        if not markdown:
+            raise ValueError("没有文章 Markdown 内容，无法转换 HTML")
 
         # Markdown → 微信兼容 HTML（先转 Markdown 再清洗）
-        wechat_html = convert_to_wechat_html(html, is_markdown=True)
+        wechat_html = convert_to_wechat_html(markdown, is_markdown=True)
 
         output_path = (cfg.outputs_dir / f"{job_id}_wechat.html").resolve()
         output_path.parent.mkdir(parents=True, exist_ok=True)

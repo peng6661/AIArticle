@@ -60,9 +60,11 @@ export const taskApi = {
       wechat_appid?: string;
       wechat_appsecret?: string;
       rag_collection?: string;
+      rag_top_k?: number;
       rag_embedding_model?: string;
       rag_embedding_provider?: string;
       rag_embedding_api_key?: string;
+      skip_image_generation?: boolean;
     }
   ) => {
     const { data } = await apiClient.post(
@@ -91,6 +93,11 @@ export const taskApi = {
       wechat_appid?: string;
       wechat_appsecret?: string;
       skip_image_generation?: boolean;
+      rag_collection?: string;
+      rag_top_k?: number;
+      rag_embedding_model?: string;
+      rag_embedding_provider?: string;
+      rag_embedding_api_key?: string;
     }
   ) => {
     const { data } = await apiClient.post(

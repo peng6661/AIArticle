@@ -22,6 +22,14 @@ from app.api.search_router import router as search_router
 from app.db.database import ensure_database_schema
 
 
+def _is_relative_to(path: Path, directory: Path) -> bool:
+    try:
+        path.relative_to(directory)
+        return True
+    except ValueError:
+        return False
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     cfg = get_settings()
@@ -127,7 +135,7 @@ def create_app() -> FastAPI:
             
             # 允许访问 downloads 和 outputs 目录下的文件
             allowed_dirs = [downloads_dir, outputs_dir]
-            if not any(str(resolved_path).startswith(str(d)) for d in allowed_dirs):
+            if not any(_is_relative_to(resolved_path, d) for d in allowed_dirs):
                 raise HTTPException(status_code=403, detail="不允许访问该目录")
             
             if not resolved_path.exists():
@@ -191,7 +199,7 @@ def create_app() -> FastAPI:
             resolved_path = file_path.resolve()
             
             allowed_dirs = [downloads_dir, outputs_dir]
-            if not any(str(resolved_path).startswith(str(d)) for d in allowed_dirs):
+            if not any(_is_relative_to(resolved_path, d) for d in allowed_dirs):
                 raise HTTPException(status_code=403, detail="不允许访问该目录")
             
             if not resolved_path.exists():

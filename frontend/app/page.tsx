@@ -479,19 +479,19 @@ export default function Home() {
     // 立即执行一次轮询，避免等待首个 interval
     pollOnce(jobId).then((done) => {
       if (done) {
-        // 任务完成：刷新历史列表，并清除 activeJob 让任务回到历史栏
-        fetchHistory().then(() => clearActiveJob());
+        // 任务完成：刷新整个页面
+        window.location.reload();
         return;
       }
       pollingRef.current = setInterval(async () => {
         const isDone = await pollOnce(jobId);
         if (isDone) {
           stopPolling();
-          fetchHistory().then(() => clearActiveJob());
+          window.location.reload();
         }
       }, 5000);
     });
-  }, [stopPolling, fetchHistory, pollOnce, clearActiveJob]);
+  }, [stopPolling, pollOnce]);
 
   useEffect(() => {
     return () => stopPolling();
@@ -736,6 +736,11 @@ export default function Home() {
           wechat_appid: wechatAppid.trim() || undefined,
           wechat_appsecret: wechatAppsecret.trim() || undefined,
           skip_image_generation: !generateCoverImage,
+          rag_collection: ragCollection || undefined,
+          rag_top_k: ragTopK,
+          rag_embedding_model: ragEmbeddingModel.trim() || undefined,
+          rag_embedding_provider: ragEmbeddingProvider,
+          rag_embedding_api_key: ragEmbeddingApiKey.trim() || undefined,
         });
 
         if (res.success) {
@@ -794,6 +799,11 @@ export default function Home() {
           wechat_appid: wechatAppid.trim() || undefined,
           wechat_appsecret: wechatAppsecret.trim() || undefined,
           skip_image_generation: !generateCoverImage,
+          rag_collection: ragCollection || undefined,
+          rag_top_k: ragTopK,
+          rag_embedding_model: ragEmbeddingModel.trim() || undefined,
+          rag_embedding_provider: ragEmbeddingProvider,
+          rag_embedding_api_key: ragEmbeddingApiKey.trim() || undefined,
         });
 
         if (res.success) {
@@ -1058,9 +1068,11 @@ export default function Home() {
         wechat_appid: settings.wechatAppid || undefined,
         wechat_appsecret: settings.wechatAppsecret || undefined,
         rag_collection: settings.ragCollection || undefined,
+        rag_top_k: settings.ragTopK,
         rag_embedding_model: settings.ragEmbeddingModel || undefined,
         rag_embedding_provider: settings.ragEmbeddingProvider || undefined,
         rag_embedding_api_key: settings.ragEmbeddingApiKey || undefined,
+        skip_image_generation: !generateCoverImage,
       });
       startPolling(jobId);
       await fetchHistory();
@@ -1242,6 +1254,11 @@ export default function Home() {
         wechat_appid: settings.wechatAppid || undefined,
         wechat_appsecret: settings.wechatAppsecret || undefined,
         skip_image_generation: !generateCoverImage,
+        rag_collection: settings.ragCollection || undefined,
+        rag_top_k: settings.ragTopK,
+        rag_embedding_model: settings.ragEmbeddingModel || undefined,
+        rag_embedding_provider: settings.ragEmbeddingProvider || undefined,
+        rag_embedding_api_key: settings.ragEmbeddingApiKey || undefined,
       });
       // 立即刷新 activeJob，确保活动卡片立刻从"已暂停"切换到"运行中"
       try {

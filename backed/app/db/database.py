@@ -312,6 +312,16 @@ def ensure_database_schema() -> None:
                 " COMMENT 'ChromaDB 中用于标识该文档分块的 doc_id'"
             )
 
+    if "content_tasks" in inspector.get_table_names():
+        content_task_columns = {
+            column["name"] for column in inspector.get_columns("content_tasks")
+        }
+        if "rag_top_k" not in content_task_columns:
+            alter_statements.append(
+                "ALTER TABLE content_tasks ADD COLUMN rag_top_k INT NOT NULL DEFAULT 5"
+                " COMMENT 'RAG 检索返回的相关块数量'"
+            )
+
     if not alter_statements:
         return
 

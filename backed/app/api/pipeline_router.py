@@ -305,6 +305,19 @@ def _get_latest_failed_step(job: PipelineJob) -> StepResult | None:
     return None
 
 
+def _expected_steps_for_job(job: PipelineJob) -> list[StepName]:
+    steps = [
+        StepName.DOWNLOAD,
+        StepName.EXTRACT_AUDIO,
+        StepName.TRANSCRIBE,
+        StepName.GENERATE_ARTICLE,
+    ]
+    if not job.skip_image_generation:
+        steps.append(StepName.GENERATE_IMAGE)
+    steps.extend([StepName.CONVERT_HTML, StepName.PUBLISH_DRAFT])
+    return steps
+
+
 def _require_api_key(api_key: str) -> str:
     resolved = (api_key or "").strip()
     if not resolved:
@@ -402,6 +415,7 @@ def _run_retry_and_continue(job_id: str, retried_step: StepName, req_snapshot: d
                 pipeline_job_id=job_id,
                 transcript=job.transcript_text,
                 rag_collection=req_snapshot.get("rag_collection") or None,
+                rag_top_k=req_snapshot.get("rag_top_k"),
                 rag_embedding_model=req_snapshot.get("rag_embedding_model") or None,
                 rag_embedding_provider=req_snapshot.get("rag_embedding_provider") or None,
                 rag_embedding_api_key=req_snapshot.get("rag_embedding_api_key") or None,
@@ -581,6 +595,7 @@ def _continue_remaining_steps(job_id: str, req_snapshot: dict):
                         pipeline_job_id=job_id,
                         transcript=job.transcript_text,
                         rag_collection=req_snapshot.get("rag_collection") or None,
+                        rag_top_k=req_snapshot.get("rag_top_k"),
                         rag_embedding_model=req_snapshot.get("rag_embedding_model") or None,
                         rag_embedding_provider=req_snapshot.get("rag_embedding_provider") or None,
                         rag_embedding_api_key=req_snapshot.get("rag_embedding_api_key") or None,
@@ -854,7 +869,7 @@ def _schedule_resume_for_remaining_steps(
     """根据已完成的步骤，从第一个未完成的步骤开始调度后续所有步骤。"""
 
     completed_steps = {s.step for s in job.steps if s.status == JobStatus.SUCCESS}
-    remaining = [s for s in StepName if s not in completed_steps]
+    remaining = [s for s in _expected_steps_for_job(job) if s not in completed_steps]
 
     if not remaining:
         return None  # 所有步骤已完成
@@ -923,7 +938,7 @@ async def resume_job(job_id: str, req: ResumeJobRequest, background_tasks: Backg
 
     # 检查是否所有步骤已完成
     completed_steps = {s.step for s in job.steps if s.status == JobStatus.SUCCESS}
-    remaining = [s for s in StepName if s not in completed_steps]
+    remaining = [s for s in _expected_steps_for_job(job) if s not in completed_steps]
     if not remaining:
         job.status = JobStatus.SUCCESS
         pipeline_store.save(job)
@@ -1114,6 +1129,7 @@ def _run_regenerate(job_id: str, req_snapshot: dict, extra: dict):
             pipeline_job_id=job_id,
             transcript=job.transcript_text,
             rag_collection=extra.get("rag_collection") or None,
+            rag_top_k=extra.get("rag_top_k"),
             rag_embedding_model=extra.get("rag_embedding_model") or None,
             rag_embedding_provider=extra.get("rag_embedding_provider") or None,
             rag_embedding_api_key=extra.get("rag_embedding_api_key") or None,
