@@ -4,7 +4,7 @@ Pydantic 请求/响应模型
 from __future__ import annotations
 
 from typing import Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.core.pipeline import JobStatus, StepName
 
@@ -25,6 +25,7 @@ class RetryJobRequest(BaseModel):
     image_api_key: str = Field("", description="图片生成专用 API Key，留空使用 api_key")
     image_model: str = Field("", description="图片生成模型，留空使用 image_provider 默认")
     skip_image_generation: bool = Field(False, description="是否跳过封面图生成")
+    article_source_mode: str = Field("video_transcript", description="文章生成模式: video_transcript | text_rewrite")
     wechat_appid: str = Field("", description="公众号 AppID，发布/上传素材重试时使用")
     wechat_appsecret: str = Field("", description="公众号 AppSecret，发布/上传素材重试时使用")
     rag_collection: str = Field("", description="RAG 知识库集合名，留空不使用 RAG")
@@ -81,6 +82,8 @@ class ExtractAudioResponse(BaseResponse):
 # ── Step 3: 语音转写 ────────────────────────────────────────────────────────
 
 class TranscribeRequest(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
     job_id: str = Field(..., description="job_id")
     model_size: str = Field("small", description="模型: tiny/base/small/medium/large-v3")
     language: str = Field("zh", description="语言代码")
@@ -108,6 +111,7 @@ class ResumeJobRequest(BaseModel):
     image_api_key: str = Field("", description="图片生成专用 API Key，留空使用 api_key")
     image_model: str = Field("", description="图片生成模型，留空使用 image_provider 默认")
     skip_image_generation: bool = Field(False, description="是否跳过封面图生成")
+    article_source_mode: str = Field("video_transcript", description="文章生成模式: video_transcript | text_rewrite")
     wechat_appid: str = Field("", description="公众号 AppID，发布步骤需要")
     wechat_appsecret: str = Field("", description="公众号 AppSecret")
     rag_collection: str = Field("", description="RAG 知识库集合名，留空不使用 RAG")
@@ -187,6 +191,7 @@ class FullPipelineRequest(BaseModel):
     title: str = Field("", description="覆盖文章标题")
     original_notice: str = Field("", description="原创声明")
     skip_image_generation: bool = Field(False, description="是否跳过封面图生成")
+    article_source_mode: str = Field("video_transcript", description="文章生成模式: video_transcript | text_rewrite")
     rag_collection: str = Field("", description="RAG 知识库集合名，留空不使用 RAG")
     rag_top_k: int = Field(5, description="RAG 检索返回的相关块数量", ge=1, le=20)
     rag_embedding_model: str = Field("", description="RAG 向量模型，留空使用 config 默认值")
@@ -208,6 +213,7 @@ class RegenerateJobRequest(BaseModel):
     image_api_key: str = Field("", description="图片生成专用 API Key，留空使用 api_key")
     image_model: str = Field("", description="图片生成模型，留空使用 image_provider 默认")
     skip_image_generation: bool = Field(False, description="是否跳过封面图生成")
+    article_source_mode: str = Field("video_transcript", description="文章生成模式: video_transcript | text_rewrite")
     wechat_appid: str = Field("", description="公众号 AppID")
     wechat_appsecret: str = Field("", description="公众号 AppSecret")
     rag_collection: str = Field("", description="RAG 知识库集合名，留空不使用 RAG")

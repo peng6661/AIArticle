@@ -26,6 +26,8 @@ import {
   STORAGE_KEY_RAG_EMBEDDING_MODEL,
   STORAGE_KEY_RAG_EMBEDDING_PROVIDER,
   STORAGE_KEY_RAG_EMBEDDING_API_KEY,
+  STORAGE_KEY_ARTICLE_SOURCE_MODE,
+  ArticleSourceMode,
   readStoredRetrySettings,
 } from "@/lib/task-settings";
 import Navbar from "@/components/navbar";
@@ -261,6 +263,7 @@ export default function Home() {
   const [ragEmbeddingModel, setRagEmbeddingModel] = useState("");
   const [ragEmbeddingProvider, setRagEmbeddingProvider] = useState<"siliconflow" | "zhipu">("zhipu");
   const [ragEmbeddingApiKey, setRagEmbeddingApiKey] = useState("");
+  const [articleSourceMode, setArticleSourceMode] = useState<ArticleSourceMode>("video_transcript");
   const [generateCoverImage, setGenerateCoverImage] = useState(true); // 封面生成开关，默认开启
   const [collections, setCollections] = useState<KnowledgeCollection[]>([]);
   const [showSettings, setShowSettings] = useState(false);
@@ -414,6 +417,11 @@ export default function Home() {
       setRagEmbeddingProvider(storedEmbProvider);
     }
     setRagEmbeddingApiKey(localStorage.getItem(STORAGE_KEY_RAG_EMBEDDING_API_KEY) || "");
+    setArticleSourceMode(
+      localStorage.getItem(STORAGE_KEY_ARTICLE_SOURCE_MODE) === "text_rewrite"
+        ? "text_rewrite"
+        : "video_transcript"
+    );
 
     // 获取历史任务，并自动恢复对正在运行任务的轮询
     taskApi.listJobs().then((result) => {
@@ -736,6 +744,7 @@ export default function Home() {
           wechat_appid: wechatAppid.trim() || undefined,
           wechat_appsecret: wechatAppsecret.trim() || undefined,
           skip_image_generation: !generateCoverImage,
+          article_source_mode: "text_rewrite",
           rag_collection: ragCollection || undefined,
           rag_top_k: ragTopK,
           rag_embedding_model: ragEmbeddingModel.trim() || undefined,
@@ -799,6 +808,7 @@ export default function Home() {
           wechat_appid: wechatAppid.trim() || undefined,
           wechat_appsecret: wechatAppsecret.trim() || undefined,
           skip_image_generation: !generateCoverImage,
+          article_source_mode: "video_transcript",
           rag_collection: ragCollection || undefined,
           rag_top_k: ragTopK,
           rag_embedding_model: ragEmbeddingModel.trim() || undefined,
@@ -873,6 +883,7 @@ export default function Home() {
     localStorage.setItem(STORAGE_KEY_RAG_EMBEDDING_MODEL, ragEmbeddingModel.trim());
     localStorage.setItem(STORAGE_KEY_RAG_EMBEDDING_PROVIDER, ragEmbeddingProvider);
     localStorage.setItem(STORAGE_KEY_RAG_EMBEDDING_API_KEY, ragEmbeddingApiKey.trim());
+    localStorage.setItem(STORAGE_KEY_ARTICLE_SOURCE_MODE, articleSourceMode);
     // 保存写作风格设置
     try {
       const req: FullPipelineRequest = {
@@ -886,6 +897,7 @@ export default function Home() {
         image_api_key: getImageApiKey() || undefined,
         image_model: imageModel.trim() || undefined,
         skip_image_generation: !generateCoverImage,
+        article_source_mode: articleSourceMode,
         rag_collection: ragCollection || undefined,
         rag_top_k: ragTopK,
         rag_embedding_model: ragEmbeddingModel.trim() || undefined,
@@ -1056,6 +1068,7 @@ export default function Home() {
     if (ragEmbeddingModel.trim()) localStorage.setItem(STORAGE_KEY_RAG_EMBEDDING_MODEL, ragEmbeddingModel.trim());
     if (ragEmbeddingProvider.trim()) localStorage.setItem(STORAGE_KEY_RAG_EMBEDDING_PROVIDER, ragEmbeddingProvider.trim());
     if (ragEmbeddingApiKey.trim()) localStorage.setItem(STORAGE_KEY_RAG_EMBEDDING_API_KEY, ragEmbeddingApiKey.trim());
+    localStorage.setItem(STORAGE_KEY_ARTICLE_SOURCE_MODE, articleSourceMode);
     try {
       const settings = readStoredRetrySettings();
       await taskApi.retryFailedJob(jobId, {
@@ -1073,6 +1086,7 @@ export default function Home() {
         rag_embedding_provider: settings.ragEmbeddingProvider || undefined,
         rag_embedding_api_key: settings.ragEmbeddingApiKey || undefined,
         skip_image_generation: !generateCoverImage,
+        article_source_mode: settings.articleSourceMode,
       });
       startPolling(jobId);
       await fetchHistory();
@@ -1125,6 +1139,7 @@ export default function Home() {
     localStorage.setItem(STORAGE_KEY_RAG_EMBEDDING_MODEL, ragEmbeddingModel.trim());
     localStorage.setItem(STORAGE_KEY_RAG_EMBEDDING_PROVIDER, ragEmbeddingProvider);
     localStorage.setItem(STORAGE_KEY_RAG_EMBEDDING_API_KEY, ragEmbeddingApiKey.trim());
+    localStorage.setItem(STORAGE_KEY_ARTICLE_SOURCE_MODE, articleSourceMode);
     try {
       const settings = readStoredRetrySettings();
       const res = await taskApi.regenerateJob(jobId, {
@@ -1135,6 +1150,7 @@ export default function Home() {
         image_api_key: settings.imageApiKey || imageApiKey.trim() || undefined,
         image_model: imageModel.trim() || undefined,
         skip_image_generation: !generateCoverImage,
+        article_source_mode: articleSourceMode,
         wechat_appid: wechatAppid.trim() || undefined,
         wechat_appsecret: wechatAppsecret.trim() || undefined,
         rag_collection: ragCollection || undefined,
@@ -1242,6 +1258,7 @@ export default function Home() {
     } else if (imageProvider === "zhipu") {
       localStorage.setItem(STORAGE_KEY_ZHIPU_IMAGE_API_KEY, imageApiKey.trim());
     }
+    localStorage.setItem(STORAGE_KEY_ARTICLE_SOURCE_MODE, articleSourceMode);
     try {
       const settings = readStoredRetrySettings();
       await taskApi.resumeJob(jobId, {
@@ -1254,6 +1271,7 @@ export default function Home() {
         wechat_appid: settings.wechatAppid || undefined,
         wechat_appsecret: settings.wechatAppsecret || undefined,
         skip_image_generation: !generateCoverImage,
+        article_source_mode: settings.articleSourceMode,
         rag_collection: settings.ragCollection || undefined,
         rag_top_k: settings.ragTopK,
         rag_embedding_model: settings.ragEmbeddingModel || undefined,

@@ -370,6 +370,16 @@ cd frontend
 npx tsc --noEmit
 ```
 
+## Recent Updates
+
+- Added article source mode support for video transcripts and uploaded text rewrites.
+- Preserved article source mode across full runs, uploads, retries, resumes, and regeneration.
+- Added RAG embedding model/provider/key persistence for resumed and regenerated article tasks.
+- Improved article generation prompts for text rewrite workflows and added retry handling for empty LLM output.
+- Fixed job status loading when pending steps have no `started_at` timestamp.
+- Fixed Pydantic startup warning for the transcription `model_size` request field.
+- Improved cover image publishing fallback when image generation is skipped or unavailable.
+
 ## License
 
 MIT

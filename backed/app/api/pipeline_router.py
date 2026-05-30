@@ -353,6 +353,7 @@ def _schedule_retry_for_failed_step(
         "image_api_key": req.image_api_key or "",
         "image_model": req.image_model or "",
         "skip_image_generation": req.skip_image_generation,
+        "article_source_mode": req.article_source_mode,
         "wechat_appid": req.wechat_appid,
         "wechat_appsecret": req.wechat_appsecret,
         "rag_collection": req.rag_collection,
@@ -431,6 +432,7 @@ def _run_retry_and_continue(job_id: str, retried_step: StepName, req_snapshot: d
                 image_provider=req_snapshot.get("image_provider", ""),
                 image_model=req_snapshot.get("image_model", ""),
                 skip_image_generation=req_snapshot.get("skip_image_generation", False),
+                article_source_mode=req_snapshot.get("article_source_mode", "video_transcript"),
             )  # ← in _run_retry_and_continue()
             print(f"[重试-Step4] 执行完成 | status={output['status']}")
 
@@ -611,6 +613,7 @@ def _continue_remaining_steps(job_id: str, req_snapshot: dict):
                         image_provider=req_snapshot.get("image_provider", ""),
                         image_model=req_snapshot.get("image_model", ""),
                         skip_image_generation=req_snapshot.get("skip_image_generation", False),
+                        article_source_mode=req_snapshot.get("article_source_mode", "video_transcript"),
                     )  # ← in _continue_remaining_steps()
                     print(f"[继续-Step4] 执行完成 | status={output['status']}")
 
@@ -901,6 +904,7 @@ def _schedule_resume_for_remaining_steps(
             "image_api_key": req.image_api_key or "",
             "image_model": req.image_model or "",
             "skip_image_generation": req.skip_image_generation,
+            "article_source_mode": req.article_source_mode,
         }
         background_tasks.add_task(_continue_remaining_steps, job.job_id, req_snapshot)
     elif first == StepName.CONVERT_HTML:
@@ -967,6 +971,7 @@ async def resume_job(job_id: str, req: ResumeJobRequest, background_tasks: Backg
         "image_api_key": req.image_api_key or "",
         "image_model": req.image_model or "",
         "skip_image_generation": req.skip_image_generation,
+        "article_source_mode": req.article_source_mode,
         "wechat_appid": req.wechat_appid,
         "wechat_appsecret": req.wechat_appsecret,
         "rag_collection": req.rag_collection,
@@ -1058,6 +1063,7 @@ async def regenerate_job(job_id: str, req: RegenerateJobRequest, background_task
         "image_api_key": req.image_api_key or "",
         "image_model": req.image_model or "",
         "skip_image_generation": req.skip_image_generation,
+        "article_source_mode": req.article_source_mode,
         "wechat_appid": req.wechat_appid,
         "wechat_appsecret": req.wechat_appsecret,
     }
@@ -1146,6 +1152,7 @@ def _run_regenerate(job_id: str, req_snapshot: dict, extra: dict):
             image_provider=req_snapshot.get("image_provider", ""),
             image_model=req_snapshot.get("image_model", ""),
             skip_image_generation=req_snapshot.get("skip_image_generation", False),
+            article_source_mode=req_snapshot.get("article_source_mode", "video_transcript"),
         )
         print(f"[再次生成-Step4] 执行完成 | status={output['status']}")
 
@@ -1479,6 +1486,7 @@ async def upload_text(
             "image_api_key": "",
             "image_model": "",
             "skip_image_generation": skip_image_generation,
+            "article_source_mode": "text_rewrite",
             "wechat_appid": wechat_appid,
             "wechat_appsecret": wechat_appsecret,
             "rag_collection": rag_collection,

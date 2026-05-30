@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -268,6 +269,52 @@ def _compress_transcript(
 
 # 文案超过此字符数时先压缩再生成文章
 TRANSCRIPT_COMPRESS_THRESHOLD = 5000
+ARTICLE_SOURCE_VIDEO = "video_transcript"
+ARTICLE_SOURCE_TEXT_REWRITE = "text_rewrite"
+VALID_ARTICLE_SOURCE_MODES = {ARTICLE_SOURCE_VIDEO, ARTICLE_SOURCE_TEXT_REWRITE}
+
+
+def _normalize_article_source_mode(source_mode: str | None) -> str:
+    mode = (source_mode or ARTICLE_SOURCE_VIDEO).strip()
+    return mode if mode in VALID_ARTICLE_SOURCE_MODES else ARTICLE_SOURCE_VIDEO
+
+
+def _build_article_user_message(
+    transcript_part: str,
+    knowledge_context: str,
+    source_mode: str,
+) -> str:
+    knowledge_block = ""
+    if knowledge_context and knowledge_context.strip():
+        knowledge_block = (
+            f"\n\n# 【参考知识（用于提升深度）】\n{knowledge_context[:3000]}\n\n"
+            "参考知识只能自然融入正文，用来佐证观点、补充背景或引用行业经验，"
+            "不要单独列出“参考知识”段落。"
+        )
+
+    if source_mode == ARTICLE_SOURCE_TEXT_REWRITE:
+        return (
+            "请把下面这份成品文案/帖子/文章当作“素材库”，而不是当作需要逐段改写的原文。\n\n"
+            "# 【原始文案】\n"
+            f"{transcript_part}"
+            f"{knowledge_block}\n\n"
+            "请先在内部完成拆解和重组，再只输出最终公众号文章：\n"
+            "1. 提取原文里的事实、观点、案例、方法和可验证信息。\n"
+            "2. 不沿用原文标题、段落顺序、小标题和句式，不逐段同义改写。\n"
+            "3. 重新选择一个更适合公众号读者的角度，重建文章结构。\n"
+            "4. 保留有价值的信息，但用新的叙事路径、例子连接和表达方式写成文章。\n"
+            "5. 如果原文像帖子或资料，请把它升级成有开头、展开、判断和收束的完整文章。\n"
+            "6. 避免连续复用原文表达，避免让文章看起来像洗稿。"
+        )
+
+    return (
+        "请根据以下短视频口播/转写素材创作一篇完整的公众号文章。\n\n"
+        "# 【原始文案】\n"
+        f"{transcript_part}"
+        f"{knowledge_block}\n\n"
+        "请把口语化、重复、跳跃的内容整理成文章：去掉无效重复，补足逻辑结构，"
+        "保留口播里的真实判断和现场感。"
+    )
 
 
 def _remove_duplicated_title_line(markdown_text: str, title: str) -> str:
@@ -382,8 +429,6 @@ ARTICLE_TOOL_WITHOUT_IMAGE = {
                         "不要在正文中插入任何图片占位符，正文只包含纯文字 Markdown。"
                         "标题只放在 title 字段，正文不要使用 #、##、### 这类标题。"
                         "不要写目录，不要套固定小节数量。"
-                        "按问题、现象、分析、方法、结论线性推进，最多用 **加粗短语** 做段落锚点。"
-                        "如果原始文案包含操作步骤、配置流程、命令或工具使用方法，必须把实操细节写具体。"
                         "语言口语化、短句为主，段落之间空一行。"
                         "需要列表或代码时再使用 Markdown 列表和 ```语言名\\n代码内容``` 代码块。"
                     ),
@@ -412,7 +457,6 @@ SYSTEM_PROMPT_WRITER = """你是一个技术博主，为有实际经验的技术
 - 观点来自场景和实操，不靠权威背书
 
 ## 文章主线
-- 按线性叙事推进：问题 → 现象 → 分析 → 方法 → 结论
 - 不写大标题，不写目录，不套固定小节数量
 - 不强行规定几段、几个标题、几个方法，按素材信息量自然展开
 - 开头直接切入问题或场景，不铺垫背景，不解释"本文将要讲什么"
@@ -619,6 +663,7 @@ def _generate_article(
     image_provider: str = "",
     image_model: str = "",
     skip_image_generation: bool = False,
+    article_source_mode: str = ARTICLE_SOURCE_VIDEO,
 ) -> tuple[str, str]:
     """
     核心文章生成逻辑（Function Calling 版）：
@@ -640,6 +685,8 @@ def _generate_article(
     Returns:
         (article_content, image_prompt)
     """
+    article_source_mode = _normalize_article_source_mode(article_source_mode)
+
     # ── 1. 知识检索 ──
     logger.info(f"[Step4] 开始知识检索 | task_id={task_id}")
     knowledge_context = _retrieve_knowledge(transcript, task_id, api_key)
@@ -659,25 +706,13 @@ def _generate_article(
 
     # ── 2. 构造输入 ──
     has_transcript = bool(transcript and transcript.strip())
-    has_knowledge = bool(knowledge_context and knowledge_context.strip())
 
     transcript_part = transcript if has_transcript else "（无原始文案）"
-
-    if has_knowledge:
-        knowledge_part = knowledge_context[:3000]
-        user_message = (
-            f"请根据以下素材创作一篇完整的公众号文章。\n\n"
-            f"# 【原始文案】\n{transcript_part}\n\n"
-            f"# 【参考知识（用于提升深度）】\n{knowledge_part}\n\n"
-            f"要求：将参考知识自然融入文章正文中，"
-            f"用来佐证观点、补充背景或引用行业经典，"
-            f"不要单独列出『参考知识』段落。"
-        )
-    else:
-        user_message = (
-            f"请根据以下素材创作一篇完整的公众号文章。\n\n"
-            f"# 【原始文案】\n{transcript_part}"
-        )
+    user_message = _build_article_user_message(
+        transcript_part=transcript_part,
+        knowledge_context=knowledge_context,
+        source_mode=article_source_mode,
+    )
 
     # ── 3. 获取模型配置 ──
     config = get_settings()
@@ -689,77 +724,110 @@ def _generate_article(
     # ── 4. 创建 Client ──
     client = _get_llm_client(api_key, ai_provider)
 
-    # ── 5. 调用 LLM（Function Calling） ──
-    logger.info(f"[Step4] 调用 LLM 生成文章 | task_id={task_id} | model={model}")
+    # ── 5. 调用 LLM（Function Calling），失败时自动重试 ──
+    max_retries = 3
+    last_error: Exception | None = None
+    final_article = ""
+    title = "AI生成文章"
+    cover_prompt = None
 
-    messages = [
-        {"role": "system", "content": SYSTEM_PROMPT_WRITER},
-        {"role": "user", "content": user_message},
-    ]
+    for attempt in range(1, max_retries + 1):
+        try:
+            logger.info(
+                f"[Step4] 调用 LLM 生成文章 | task_id={task_id} | "
+                f"model={model} | 第{attempt}次尝试"
+            )
 
-    # 根据前端配置选择工具定义
-    if skip_image_generation:
-        logger.info("[Step4] 跳过图片生成，使用 ARTICLE_TOOL_WITHOUT_IMAGE")
-        tool_def = ARTICLE_TOOL_WITHOUT_IMAGE
-    else:
-        logger.info("[Step4] 启用图片生成，使用 ARTICLE_TOOL_WITH_IMAGE")
-        tool_def = ARTICLE_TOOL_WITH_IMAGE
+            messages = [
+                {"role": "system", "content": SYSTEM_PROMPT_WRITER},
+                {"role": "user", "content": user_message},
+            ]
 
-    response = client.chat.completions.create(
-        model=model,
-        messages=messages,
-        tools=[tool_def],
-        tool_choice={"type": "function", "function": {"name": "publish_markdown_article"}},
-        temperature=temperature,
-        max_tokens=max_tokens,
-    )
+            # 根据前端配置选择工具定义
+            if skip_image_generation:
+                logger.info("[Step4] 跳过图片生成，使用 ARTICLE_TOOL_WITHOUT_IMAGE")
+                tool_def = ARTICLE_TOOL_WITHOUT_IMAGE
+            else:
+                logger.info("[Step4] 启用图片生成，使用 ARTICLE_TOOL_WITH_IMAGE")
+                tool_def = ARTICLE_TOOL_WITH_IMAGE
 
-    article_data = _parse_tool_call_result(response)
+            response = client.chat.completions.create(
+                model=model,
+                messages=messages,
+                tools=[tool_def],
+                tool_choice={"type": "function", "function": {"name": "publish_markdown_article"}},
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
 
-    # ── 6. 解析结果 ──
-    article_data.setdefault("title", "AI生成文章")
-    article_data.setdefault("content", "")
-    if not skip_image_generation:
-        article_data.setdefault("image_prompts", [])
+            article_data = _parse_tool_call_result(response)
 
-    title = article_data["title"]
-    final_article = article_data["content"].strip()
+            # ── 6. 解析结果 ──
+            article_data.setdefault("title", "AI生成文章")
+            article_data.setdefault("content", "")
+            if not skip_image_generation:
+                article_data.setdefault("image_prompts", [])
 
-    # ── 7. 提取封面图提示词 ──
-    # 如果前端配置跳过图片生成，则直接返回空
-    if skip_image_generation:
-        logger.info(f"[_generate_article] skip_image_generation=True，跳过图片提示词提取")
-        cover_prompt = None
-    else:
-        # 从 LLM 返回的 image_prompts 数组中提取第一个（id=cover）的 prompt
-        cover_prompt = None
-        raw_prompts = article_data.get("image_prompts", [])
-        
-        if raw_prompts and isinstance(raw_prompts, list) and len(raw_prompts) > 0:
-            first = raw_prompts[0]
-            if isinstance(first, dict):
-                cover_prompt = first.get("prompt", "") or None
-            elif isinstance(first, str):
-                cover_prompt = first
-        # 兜底：如果 LLM 直接返回了 image_prompt 字段
-        if not cover_prompt and article_data.get("image_prompt"):
-            cover_prompt = article_data["image_prompt"]
-        
-        logger.info(f"[_generate_article] final cover_prompt: {cover_prompt}")
+            title = article_data["title"]
+            final_article = article_data["content"].strip()
 
-    # 强制剥离任何残留的图片占位符（即使 LLM 未完全听从指令）
-    final_article = re.sub(
-        r'【图片占位符[：:]\s*[A-Za-z0-9_]+\s*】\n*',
-        '',
-        final_article
-    ).strip()
+            # ── 7. 提取封面图提示词 ──
+            # 如果前端配置跳过图片生成，则直接返回空
+            if skip_image_generation:
+                logger.info(f"[_generate_article] skip_image_generation=True，跳过图片提示词提取")
+                cover_prompt = None
+            else:
+                # 从 LLM 返回的 image_prompts 数组中提取第一个（id=cover）的 prompt
+                cover_prompt = None
+                raw_prompts = article_data.get("image_prompts", [])
 
-    # 安全兜底：正文不重复 title，不保留 #/##/### 标题形态
-    final_article = _remove_duplicated_title_line(final_article, title)
-    final_article = _downgrade_markdown_headings(final_article).strip()
+                if raw_prompts and isinstance(raw_prompts, list) and len(raw_prompts) > 0:
+                    first = raw_prompts[0]
+                    if isinstance(first, dict):
+                        cover_prompt = first.get("prompt", "") or None
+                    elif isinstance(first, str):
+                        cover_prompt = first
+                # 兜底：如果 LLM 直接返回了 image_prompt 字段
+                if not cover_prompt and article_data.get("image_prompt"):
+                    cover_prompt = article_data["image_prompt"]
+
+                logger.info(f"[_generate_article] final cover_prompt: {cover_prompt}")
+
+            # 强制剥离任何残留的图片占位符（即使 LLM 未完全听从指令）
+            final_article = re.sub(
+                r'【图片占位符[：:]\s*[A-Za-z0-9_]+\s*】\n*',
+                '',
+                final_article
+            ).strip()
+
+            # 安全兜底：正文不重复 title，不保留 #/##/### 标题形态
+            final_article = _remove_duplicated_title_line(final_article, title)
+            final_article = _downgrade_markdown_headings(final_article).strip()
+
+            if final_article:
+                # 生成成功，跳出重试循环
+                break
+
+            # 内容为空，记录错误并准备重试
+            last_error = ValueError("LLM 返回的文章内容为空，请重试（模型可能已崩溃）")
+            logger.warning(
+                f"[Step4] 第{attempt}次尝试返回空内容，正在重试..."
+                if attempt < max_retries
+                else f"[Step4] 第{attempt}次尝试返回空内容，重试已达上限"
+            )
+
+        except Exception as e:
+            last_error = e
+            logger.warning(
+                f"[Step4] 第{attempt}次尝试失败: {e}"
+                + ("，正在重试..." if attempt < max_retries else "，重试已达上限")
+            )
+
+        if attempt < max_retries:
+            time.sleep(2 * attempt)  # 递增等待：2s, 4s, 6s
 
     if not final_article:
-        raise ValueError("LLM 返回的文章内容为空，请重试（模型可能已崩溃）")
+        raise last_error or ValueError("LLM 返回的文章内容为空，请重试（模型可能已崩溃）")
 
     logger.info(
         f"[Step4] 文章生成完成 | "
@@ -793,6 +861,7 @@ def run_step4_pipeline(
     image_provider: str = "",
     image_model: str = "",
     skip_image_generation: bool = False,
+    article_source_mode: str = ARTICLE_SOURCE_VIDEO,
 ) -> dict:
     """
     执行 Step 4 文章生成流水线（同步，在后台线程中调用）。
@@ -831,6 +900,7 @@ def run_step4_pipeline(
             image_provider=image_provider,
             image_model=image_model,
             skip_image_generation=skip_image_generation,
+            article_source_mode=article_source_mode,
         )
 
         if not final_article or not final_article.strip():

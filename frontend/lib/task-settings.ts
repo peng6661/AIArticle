@@ -18,6 +18,9 @@ export const STORAGE_KEY_RAG_TOP_K = "aicreator_rag_top_k";
 export const STORAGE_KEY_RAG_EMBEDDING_MODEL = "aicreator_rag_embedding_model";
 export const STORAGE_KEY_RAG_EMBEDDING_PROVIDER = "aicreator_rag_embedding_provider";
 export const STORAGE_KEY_RAG_EMBEDDING_API_KEY = "aicreator_rag_embedding_api_key";
+export const STORAGE_KEY_ARTICLE_SOURCE_MODE = "aicreator_article_source_mode";
+
+export type ArticleSourceMode = "video_transcript" | "text_rewrite";
 
 export interface RetryCredentials {
   apiKey: string;
@@ -34,6 +37,7 @@ export interface RetryCredentials {
   ragEmbeddingModel: string;
   ragEmbeddingProvider: string;
   ragEmbeddingApiKey: string;
+  articleSourceMode: ArticleSourceMode;
 }
 
 export function readStoredRetrySettings() {
@@ -52,6 +56,7 @@ export function readStoredRetrySettings() {
       ragEmbeddingModel: "",
       ragEmbeddingProvider: "",
       ragEmbeddingApiKey: "",
+      articleSourceMode: "video_transcript" as const,
     };
   }
 
@@ -75,6 +80,10 @@ export function readStoredRetrySettings() {
   const imageApiKey = imageProvider === "zhipu"
     ? localStorage.getItem(STORAGE_KEY_ZHIPU_IMAGE_API_KEY) || localStorage.getItem(STORAGE_KEY_ZHIPU_API_KEY) || ""
     : localStorage.getItem(STORAGE_KEY_SILICONFLOW_IMAGE_API_KEY) || localStorage.getItem(STORAGE_KEY_SILICONFLOW_API_KEY) || "";
+  const storedSourceMode = localStorage.getItem(STORAGE_KEY_ARTICLE_SOURCE_MODE);
+  const articleSourceMode: ArticleSourceMode = storedSourceMode === "text_rewrite"
+    ? "text_rewrite"
+    : "video_transcript";
 
   return {
     apiKey: localStorage.getItem(STORAGE_KEY_API) || "",
@@ -94,5 +103,6 @@ export function readStoredRetrySettings() {
     ragEmbeddingModel: localStorage.getItem(STORAGE_KEY_RAG_EMBEDDING_MODEL) || "",
     ragEmbeddingProvider: localStorage.getItem(STORAGE_KEY_RAG_EMBEDDING_PROVIDER) || "",
     ragEmbeddingApiKey: localStorage.getItem(STORAGE_KEY_RAG_EMBEDDING_API_KEY) || "",
+    articleSourceMode,
   };
 }

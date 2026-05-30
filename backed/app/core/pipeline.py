@@ -128,7 +128,7 @@ class PipelineStore:
             status=JobStatus(model.status),
             message=model.message or "",
             data=model.step_data or {},
-            started_at=model.started_at.isoformat(),
+            started_at=model.started_at.isoformat() if model.started_at else "",
             finished_at=model.finished_at.isoformat() if model.finished_at else None,
         )
 

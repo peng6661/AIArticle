@@ -45,6 +45,18 @@ function formatBoardTime(value: string) {
   return date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
 }
 
+function formatBoardSourceLabel(sourceUrl: string) {
+  if (!sourceUrl) return "聚合热榜";
+  if (sourceUrl.includes("newsnow")) return "NewsNow";
+  if (sourceUrl.includes("tophub")) return "TopHub";
+  try {
+    const hostname = new URL(sourceUrl).hostname.replace(/^www\./, "");
+    return hostname || "聚合热榜";
+  } catch {
+    return "聚合热榜";
+  }
+}
+
 export default function HotSearchShelf() {
   const [mounted, setMounted] = useState(false);
 
@@ -317,7 +329,7 @@ export default function HotSearchShelf() {
                       <div>
                         <h3 className="text-xl font-bold text-white">{activeBoard.title}</h3>
                         <p className="mt-1 text-sm text-white/45">
-                          来源：{activeBoard.source_url.includes("newsnow") ? "NewsNow / 牛客板块" : "TopHub 今日热榜"}
+                          来源：{formatBoardSourceLabel(activeBoard.source_url)}
                         </p>
                       </div>
                       <a

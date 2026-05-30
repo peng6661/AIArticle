@@ -65,6 +65,7 @@ export const taskApi = {
       rag_embedding_provider?: string;
       rag_embedding_api_key?: string;
       skip_image_generation?: boolean;
+      article_source_mode?: "video_transcript" | "text_rewrite";
     }
   ) => {
     const { data } = await apiClient.post(
@@ -98,6 +99,7 @@ export const taskApi = {
       rag_embedding_model?: string;
       rag_embedding_provider?: string;
       rag_embedding_api_key?: string;
+      article_source_mode?: "video_transcript" | "text_rewrite";
     }
   ) => {
     const { data } = await apiClient.post(
@@ -254,6 +256,7 @@ export const taskApi = {
       rag_embedding_model?: string;
       rag_embedding_provider?: string;
       rag_embedding_api_key?: string;
+      article_source_mode?: "video_transcript" | "text_rewrite";
     }
   ) => {
     const { data } = await apiClient.post(

@@ -324,6 +324,7 @@ def _run_full_pipeline_bg(job_id: str, req: FullPipelineRequest):
             image_provider=req.image_provider or "",
             image_model=req.image_model or "",
             skip_image_generation=req.skip_image_generation,
+            article_source_mode=req.article_source_mode,
         )
         print(f"[Step4] 执行完成 | status={output['status']} | image_prompt={output.get('image_prompt', 'None')}")
 
@@ -471,14 +472,23 @@ def _run_full_pipeline_bg(job_id: str, req: FullPipelineRequest):
         if not appid or not appsecret:
             raise ValueError("微信 AppID / AppSecret 未配置，无法发布草稿")
 
-        wechat_html = Path(job.wechat_html_path).read_text(encoding="utf-8")
         resolved_title = req.title or job.article_title or None
+
+        # 封面图路径：优先使用 Step5 生成的图片
+        resolved_cover: Path | None = None
+        if job.cover_image_path and Path(job.cover_image_path).exists():
+            resolved_cover = Path(job.cover_image_path)
+            print(f"[Step7] 使用封面图: {resolved_cover}")
+        else:
+            print(f"[Step7] 封面图不存在或未生成，使用默认占位图")
+
+        wechat_html = Path(job.wechat_html_path).read_text(encoding="utf-8")
 
         publish_result = publish_draft(
             appid=appid,
             appsecret=appsecret,
             content_html=wechat_html,
-            cover_image_path=job.cover_image_path,
+            cover_image_path=resolved_cover,
             title=resolved_title,
             author=req.author or None,
             original_notice=req.original_notice or None,

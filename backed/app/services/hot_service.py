@@ -10,6 +10,7 @@ import json
 import threading
 import time
 import re
+from urllib.parse import urljoin
 
 import requests
 from bs4 import BeautifulSoup
@@ -60,6 +61,10 @@ def _build_session() -> requests.Session:
 
 def _clean_text(text: str) -> str:
     return re.sub(r"\s+", " ", (text or "").strip())
+
+
+def _format_compact_number(value: str) -> str:
+    return _clean_text(value)
 
 
 # ── 微博热搜 ────────────────────────────────────────────────────────────────
@@ -440,6 +445,72 @@ def _fetch_aihot_feed(session: requests.Session) -> HotBoard:
     )
 
 
+
+
+
+def _fetch_v2ex(session: requests.Session) -> HotBoard:
+    resp = session.get(
+        "https://www.v2ex.com/",
+        headers={"Accept": "text/html", "Referer": "https://www.v2ex.com/"},
+        timeout=20,
+    )
+    resp.raise_for_status()
+    soup = BeautifulSoup(resp.text, "html.parser")
+
+    entries: list[HotEntry] = []
+    top_box = None
+    for box in soup.select("div.box"):
+        header = _clean_text(box.get_text(" ", strip=True))
+        if "Today Top 10" in header:
+            top_box = box
+            break
+
+    if top_box:
+        for link in top_box.select("a[href^='/t/']"):
+            title = _clean_text(link.get_text())
+            href = (link.get("href") or "").strip()
+            if not title or not href:
+                continue
+            entries.append(HotEntry(
+                rank=len(entries) + 1,
+                title=title,
+                article_url=urljoin("https://www.v2ex.com", href),
+                source="Today Top 10",
+            ))
+            if len(entries) >= 10:
+                break
+
+    if not entries:
+        for item in soup.select("div.cell.item"):
+            title_el = item.select_one("span.item_title a[href^='/t/']")
+            if not title_el:
+                continue
+            title = _clean_text(title_el.get_text())
+            href = (title_el.get("href") or "").strip()
+            if not title or not href:
+                continue
+            meta = item.select_one("span.topic_info")
+            score = _clean_text(meta.get_text(" ", strip=True)) if meta else ""
+            entries.append(HotEntry(
+                rank=len(entries) + 1,
+                title=title,
+                article_url=urljoin("https://www.v2ex.com", href),
+                score=score,
+                source="V2EX",
+            ))
+            if len(entries) >= 30:
+                break
+
+    if not entries:
+        raise ValueError("V2EX: 鏃犳暟鎹?")
+
+    return HotBoard(
+        id="v2ex", title="V2EX 帖子",
+        source_url="https://www.v2ex.com/",
+        accent="#f59e0b", updated_at=datetime.now().isoformat(), entries=entries,
+    )
+
+
 def _serialize_board(board: HotBoard) -> dict:
     payload = asdict(board)
     payload["entries"] = [asdict(entry) for entry in board.entries]
@@ -449,6 +520,7 @@ def _serialize_board(board: HotBoard) -> dict:
 # ── 榜单注册表 ──────────────────────────────────────────────────────────────
 
 BOARD_FETCHERS = [
+    {"id": "v2ex", "title": "V2EX 帖子", "fetch": _fetch_v2ex},
     {"id": "weibo",    "title": "微博热搜",     "fetch": _fetch_weibo},
     {"id": "douyin",   "title": "抖音热榜",     "fetch": _fetch_douyin},
     {"id": "bilibili", "title": "B站热榜",      "fetch": _fetch_bilibili},

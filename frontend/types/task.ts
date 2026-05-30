@@ -105,6 +105,7 @@ export interface FullPipelineRequest {
   title?: string;
   original_notice?: string;
   skip_image_generation?: boolean;
+  article_source_mode?: "video_transcript" | "text_rewrite";
   rag_collection?: string;
   rag_top_k?: number;
   rag_embedding_model?: string;

@@ -322,6 +322,19 @@ def ensure_database_schema() -> None:
                 " COMMENT 'RAG 检索返回的相关块数量'"
             )
 
+        if "rag_embedding_model" not in content_task_columns:
+            alter_statements.append(
+                "ALTER TABLE content_tasks ADD COLUMN rag_embedding_model VARCHAR(128) NULL"
+            )
+        if "rag_embedding_provider" not in content_task_columns:
+            alter_statements.append(
+                "ALTER TABLE content_tasks ADD COLUMN rag_embedding_provider VARCHAR(32) NULL"
+            )
+        if "rag_embedding_api_key" not in content_task_columns:
+            alter_statements.append(
+                "ALTER TABLE content_tasks ADD COLUMN rag_embedding_api_key VARCHAR(256) NULL"
+            )
+
     if not alter_statements:
         return
 
