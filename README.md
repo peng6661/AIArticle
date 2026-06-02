@@ -23,6 +23,10 @@ AIArticle 是一个本地运行的内容生产工具。它负责下载素材、�
 
 ## 最新维护
 
+- **一键启动脚本**：项目根目录 `start.bat` 双击即可同时启动前后端，后端就绪后再启动前端，避免代理报错。双击 Ctrl+C（3 秒内）停止所有服务，三层清理确保端口释放。
+- **资源库页面**（`/resources`）：无限滚动加载、骨架屏、回到顶部按钮，后端聚合爬虫提供数据源。
+- **热搜面板优化**：拖拽才能触发展开，纯点击不触发；fetch 加 3 次重试 + 递增间隔，应对后端临时不可用。
+- **启动脚本 Windows 兼容**：`shell=True` 解析 npm.cmd、`PYTHONUTF8=1` 防止中文路径乱码、`CREATE_NO_WINDOW` 不弹额外窗口。
 - RAG 检索配置现在会完整贯穿全流程、上传后继续、失败重试和再次生成，前端设置的 `rag_top_k` 会保存到 `content_tasks.rag_top_k` 并在检索时生效。
 - 本地文件预览与视频信息接口改用路径归属判断，避免同前缀目录被误判为允许访问目录。
 - 微信 HTML 转换步骤统一从 Markdown 正文字段读取内容，避免后续把已生成 HTML 再当 Markdown 二次转换。
@@ -79,14 +83,19 @@ Step 7  发布微信公众号草稿
 | 主页 | `/` | 创建全流程任务，查看历史任务，重试、暂停、再次生成 |
 | 下载页 | `/download` | 解析链接、搜索视频、下载视频/图片，显示真实进度 |
 | 知识库 | `/knowledge` | 创建集合、上传文档、从历史任务导入、检索测试、删除文档 |
+| 资料库 | `/resources` | 资源资料库，无限滚动浏览，支持搜索筛选 |
 
 ## 项目结构
 
 ```text
 AIArticle/
+├── start.bat                  # 一键启动入口（Windows）
+├── start_all.py               # 一键启动脚本（前端 + 后端）
 ├── backed/
 │   ├── main.py
 │   ├── init_db.py
+│   ├── start.bat              # 单独启动后端
+│   ├── start_server.py        # 后端守护启动脚本
 │   ├── config.yaml.example
 │   ├── requirements.txt
 │   └── app/
@@ -96,7 +105,8 @@ AIArticle/
 │       │   ├── video_router.py
 │       │   ├── search_router.py
 │       │   ├── hot_router.py
-│       │   └── knowledge_router.py
+│       │   ├── knowledge_router.py
+│       │   └── resource_library_router.py
 │       ├── core/
 │       │   ├── config.py
 │       │   └── pipeline.py
@@ -123,10 +133,13 @@ AIArticle/
 │               ├── rag_service.py
 │               └── vector_store.py
 ├── frontend/
+│   ├── start.bat              # 单独启动前端
+│   ├── start_server.py        # 前端守护启动脚本
 │   ├── app/
 │   │   ├── page.tsx
 │   │   ├── download/page.tsx
-│   │   └── knowledge/page.tsx
+│   │   ├── knowledge/page.tsx
+│   │   └── resources/page.tsx
 │   ├── components/
 │   │   ├── navbar.tsx
 │   │   ├── hot-search-shelf.tsx
@@ -149,6 +162,10 @@ AIArticle/
 - FFmpeg
 - Chrome / Edge，可选，用于导出 YouTube cookies
 - CUDA，可选，用于加速 faster-whisper
+
+### 一键启动（Windows）
+
+项目根目录双击 `start.bat`，自动启动后端和前端，浏览器自动打开。双击 Ctrl+C（3 秒内）停止所有服务。
 
 ### 后端
 
@@ -321,6 +338,12 @@ Step 4 文章生成和 Step 5 生图不再提供独立单步端点，统一由�
 | `DELETE` | `/api/knowledge/documents/{doc_id}` | 删除文档和对应向量分块 |
 | `POST` | `/api/knowledge/search` | 检索测试 |
 
+### 资料库
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| `GET` | `/api/resource-library/resources` | 资源列表，支持分页、搜索、分类筛选 |
+
 ### 文件代理
 
 | 方法 | 路径 | 说明 |
@@ -372,6 +395,11 @@ npx tsc --noEmit
 
 ## Recent Updates
 
+- Added one-click startup scripts (`start.bat` + `start_all.py`) for Windows, with sequential backend-first launch and three-layer process cleanup.
+- Added resources page (`/resources`) with infinite scroll, skeleton loading, and back-to-top button.
+- Added resource library backend API (`resource_library_router.py`) with pagination and search.
+- Improved hot-search shelf: drag threshold to prevent click triggering, fetch retry with exponential backoff.
+- Fixed Windows startup script issues: `shell=True` for npm.cmd resolution, GBK encoding, port cleanup.
 - Added article source mode support for video transcripts and uploaded text rewrites.
 - Preserved article source mode across full runs, uploads, retries, resumes, and regeneration.
 - Added RAG embedding model/provider/key persistence for resumed and regenerated article tasks.
