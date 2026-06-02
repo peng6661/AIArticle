@@ -18,6 +18,7 @@ from app.api.full_pipeline_router import router as full_router
 from app.api.video_router import router as video_router
 from app.api.hot_router import router as hot_router
 from app.api.knowledge_router import router as knowledge_router
+from app.api.resource_library_router import router as resource_library_router
 from app.api.search_router import router as search_router
 from app.db.database import ensure_database_schema
 
@@ -37,11 +38,11 @@ async def lifespan(app: FastAPI):
     cfg.downloads_dir.mkdir(parents=True, exist_ok=True)
     cfg.outputs_dir.mkdir(parents=True, exist_ok=True)
     ensure_database_schema()
-    print(f"✅ AIcreator 启动完成")
+    print("[OK] AIcreator 启动完成")
     print(f"   下载目录: {cfg.downloads_dir.resolve()}")
     print(f"   输出目录: {cfg.outputs_dir.resolve()}")
     yield
-    print("👋 AIcreator 已关闭")
+    print("[BYE] AIcreator 已关闭")
 
 
 def create_app() -> FastAPI:
@@ -70,6 +71,7 @@ def create_app() -> FastAPI:
     app.include_router(search_router)
     app.include_router(hot_router)
     app.include_router(knowledge_router)
+    app.include_router(resource_library_router)
 
     @app.get("/", tags=["Root"])
     def root():

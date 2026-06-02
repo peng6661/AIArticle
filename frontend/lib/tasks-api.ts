@@ -379,6 +379,36 @@ export const taskApi = {
     }, { timeout: 180000 });
     return data;
   },
+
+  listResourceItems: async (
+    params: { keyword?: string; netdiskType?: string; page?: number; pageSize?: number } = {}
+  ): Promise<ResourceListResponse> => {
+    const { data } = await apiClient.get("/api/resource-library", { params });
+    return data;
+  },
+
+  listResourceNetdiskTypes: async (): Promise<{ success: boolean; data: ResourceNetdiskType[] }> => {
+    const { data } = await apiClient.get("/api/resource-library/netdisk-types");
+    return data;
+  },
+
+  createResourceItem: async (payload: ResourceItemPayload): Promise<{ success: boolean; data: ResourceItem }> => {
+    const { data } = await apiClient.post("/api/resource-library", payload);
+    return data;
+  },
+
+  updateResourceItem: async (
+    id: number,
+    payload: ResourceItemPayload
+  ): Promise<{ success: boolean; data: ResourceItem }> => {
+    const { data } = await apiClient.put(`/api/resource-library/${id}`, payload);
+    return data;
+  },
+
+  deleteResourceItem: async (id: number): Promise<{ success: boolean; message: string }> => {
+    const { data } = await apiClient.delete(`/api/resource-library/${id}`);
+    return data;
+  },
 };
 
 // ── 知识库类型定义 ──────────────────────────────────────────────
@@ -418,4 +448,32 @@ export interface VideoSearchResult {
   publish_time: string;
   heat_score: number;
   description: string;
+}
+
+export interface ResourceItem {
+  id: number;
+  name: string;
+  netdiskType: string;
+  url: string;
+  feishuTableName: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type ResourceItemPayload = Omit<ResourceItem, "id"> & { id?: number };
+
+export interface ResourceNetdiskType {
+  name: string;
+  count: number;
+}
+
+export interface ResourceListResponse {
+  success: boolean;
+  data: ResourceItem[];
+  pagination: {
+    page: number;
+    pageSize: number;
+    total: number;
+    totalPages: number;
+  };
 }

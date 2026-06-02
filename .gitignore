@@ -81,3 +81,9 @@ backed/cookies_youtube.txt
 
 # Media output data directory
 backed/data/
+
+# Scripts (local utility scripts, not for distribution)
+backed/scripts/
+
+# Windows nul file artifact
+nul

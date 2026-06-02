@@ -463,6 +463,39 @@ class KnowledgeDocumentModel(Base):
 # 智能写作任务表
 # ══════════════════════════════════════════════════════════════════════════════
 
+class ResourceLibraryItemModel(Base):
+    __tablename__ = "resource_library_items"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    name: Mapped[str] = mapped_column(String(512), nullable=False, index=True)
+    netdisk_type: Mapped[str] = mapped_column(String(64), nullable=False, default="", index=True)
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+    feishu_table_name: Mapped[str] = mapped_column(String(128), nullable=False, default="")
+    source_created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    source_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=_now_utc,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=_now_utc,
+        onupdate=_now_utc,
+        server_default=func.now(),
+    )
+
+    __table_args__ = (
+        Index("ix_resource_library_name_type", "name", "netdisk_type"),
+        {"mysql_engine": "InnoDB", "mysql_charset": "utf8mb4", "mysql_collate": "utf8mb4_unicode_ci"},
+    )
+
+    def __repr__(self) -> str:
+        return f"<ResourceLibraryItem id={self.id!r} name={self.name!r}>"
+
+
 class ContentTaskModel(Base):
     """
     智能写作任务表（用于 Step 4 重构）。

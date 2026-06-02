@@ -118,7 +118,17 @@ export default function HotSearchShelf() {
       setError("");
       const url = new URL("/api/hot/boards", window.location.origin);
       if (forceRefresh) url.searchParams.set("force_refresh", "true");
-      const resp = await fetch(url.toString(), { cache: "no-store" });
+      let resp: Response | null = null;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          resp = await fetch(url.toString(), { cache: "no-store" });
+          break;
+        } catch {
+          if (attempt < 2) await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+          else throw new Error("后端连接失败，请检查服务是否已启动");
+        }
+      }
+      if (!resp) throw new Error("请求未返回");
       if (!resp.ok) throw new Error(`请求失败 (${resp.status})`);
       const data: HotBoardsResponse = await resp.json();
       if (!data.success) throw new Error(data.message || "获取热榜失败");
@@ -175,12 +185,16 @@ export default function HotSearchShelf() {
     setIsDragging(false);
     e.currentTarget.releasePointerCapture(e.pointerId);
 
-    // 链条始终垂直，只看 Y 方向拉伸
-    if (handleY > initialChainLen * 0.6) {
+    // 判断是否为实际拖拽（Y 方向移动 > 20px），纯点击不触发展开
+    const totalDragDistance = Math.abs(e.clientY - d.startY);
+    const didDrag = totalDragDistance > 20;
+
+    if (didDrag && handleY > initialChainLen * 0.6) {
       setIsExpanded(true);
-    } else {
+    } else if (didDrag && handleY <= initialChainLen * 0.6) {
       setIsExpanded(false);
     }
+    // 纯点击（未拖拽）：不改变展开状态
 
     // Y 回弹到初始长度，X 保持当前位置（锚点跟随）
     setHandleY(initialChainLen);
