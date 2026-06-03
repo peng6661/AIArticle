@@ -255,6 +255,10 @@ def main():
     print("  ╚═══════════════════════════════════════════════════════╝")
     print()
 
+    # 0) 启动前先清理残留端口（防止上次未正常退出导致端口占用）
+    for port in [BACKEND_PORT, FRONTEND_PORT, FRONTEND_PORT + 1]:
+        _kill_by_port(port)
+
     # 1) 先启动后端，等待就绪后再启动前端（消除竞态）
     print("  [1/3] 启动后端 FastAPI ...")
     _start_backend()
