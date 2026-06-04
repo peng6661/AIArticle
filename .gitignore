@@ -85,5 +85,12 @@ backed/data/
 # Scripts (local utility scripts, not for distribution)
 backed/scripts/
 
+# Run script helpers (local only)
+run_script.py
+run_script.bat
+
+# Export temp files
+backed/exports/
+
 # Windows nul file artifact
 nul

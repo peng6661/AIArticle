@@ -25,6 +25,7 @@ AIArticle 是一个本地运行的内容生产工具。它负责下载素材、�
 
 - **一键启动脚本**：项目根目录 `start.bat` 双击即可同时启动前后端，后端就绪后再启动前端，避免代理报错。双击 Ctrl+C（3 秒内）停止所有服务，三层清理确保端口释放。
 - **资源库页面**（`/resources`）：无限滚动加载、骨架屏、回到顶部按钮，后端聚合爬虫提供数据源。
+- **资料库导入/导出**：支持 Excel 批量导入（自动识别网盘类型、去重校验），支持 Excel / PDF / Word 多格式导出（关键词/类型/数量筛选）。
 - **热搜面板优化**：拖拽才能触发展开，纯点击不触发；fetch 加 3 次重试 + 递增间隔，应对后端临时不可用。
 - **启动脚本 Windows 兼容**：`shell=True` 解析 npm.cmd、`PYTHONUTF8=1` 防止中文路径乱码、`CREATE_NO_WINDOW` 不弹额外窗口。
 - RAG 检索配置现在会完整贯穿全流程、上传后继续、失败重试和再次生成，前端设置的 `rag_top_k` 会保存到 `content_tasks.rag_top_k` 并在检索时生效。
@@ -343,6 +344,11 @@ Step 4 文章生成和 Step 5 生图不再提供独立单步端点，统一由�
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | `GET` | `/api/resource-library/resources` | 资源列表，支持分页、搜索、分类筛选 |
+| `POST` | `/api/resource-library` | 新增资源（URL 自动去重） |
+| `PUT` | `/api/resource-library/{id}` | 更新资源 |
+| `DELETE` | `/api/resource-library/{id}` | 删除资源 |
+| `POST` | `/api/resource-library/import` | 导入 Excel（.xlsx/.xls），自动识别网盘类型、去重 |
+| `GET` | `/api/resource-library/export` | 导出资源，支持 Excel / PDF / Word，支持筛选 |
 
 ### 文件代理
 
@@ -395,6 +401,9 @@ npx tsc --noEmit
 
 ## Recent Updates
 
+- Added resource library import/export: Excel batch import with auto netdisk-type detection and dedup; Excel/PDF/Word export with keyword/type/limit filtering.
+- Added URL dedup check for resource creation (returns 409 on duplicate).
+- Added custom dropdown component `NetdiskTypeSelect` for resource form (dark theme consistency).
 - Added one-click startup scripts (`start.bat` + `start_all.py`) for Windows, with sequential backend-first launch and three-layer process cleanup.
 - Added resources page (`/resources`) with infinite scroll, skeleton loading, and back-to-top button.
 - Added resource library backend API (`resource_library_router.py`) with pagination and search.

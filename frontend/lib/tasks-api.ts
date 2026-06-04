@@ -409,6 +409,45 @@ export const taskApi = {
     const { data } = await apiClient.delete(`/api/resource-library/${id}`);
     return data;
   },
+
+  /** 导入 Excel（.xlsx / .xls） */
+  importResources: async (file: File): Promise<{
+    success: boolean;
+    data: {
+      imported: number;
+      duplicates: number;
+      errors: number;
+      dup_urls: string[];
+      error_msgs: string[];
+    };
+  }> => {
+    const formData = new FormData();
+    formData.append("file", file);
+    const { data } = await axios.post(`${API_BASE}/api/resource-library/import`, formData, {
+      headers: { "Content-Type": "multipart/form-data" },
+      timeout: 5 * 60 * 1000,
+    });
+    return data;
+  },
+
+  /** 导出资料库（返回文件下载 URL） */
+  exportResources: async (params: {
+    keyword?: string;
+    netdiskType?: string;
+    ids?: number[];
+    limit?: number;
+    format?: "excel" | "pdf" | "word";
+  } = {}): Promise<Blob> => {
+    const { data } = await apiClient.get("/api/resource-library/export", {
+      params: {
+        ...params,
+        ids: params.ids?.join(","),
+      },
+      responseType: "blob",
+      timeout: 5 * 60 * 1000,
+    });
+    return data;
+  },
 };
 
 // ── 知识库类型定义 ──────────────────────────────────────────────
