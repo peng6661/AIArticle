@@ -5,6 +5,8 @@
 AIArticle 是一个本地运行的内容生产工具。它负责下载素材、提取音频、语音转写、生成 Markdown 文章、生成封面图、清洗微信 HTML，并最终发布到微信公众号草稿箱。
 
 当前主页流程以“发布微信草稿”为终点。也就是说，正常生成任务需要提供微信公众号 AppID / AppSecret，项目不再把“只生成不发布”作为主页主流程。
+<img width="1910" height="945" alt="image" src="https://github.com/user-attachments/assets/e99e4815-e06f-4f66-a471-60b8baa95c00" />
+
 
 ## 核心能力
 
