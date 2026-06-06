@@ -62,7 +62,6 @@ def _serialize(item: ResourceLibraryItemModel) -> dict[str, Any]:
         "name": item.name,
         "netdiskType": item.netdisk_type,
         "url": item.url,
-        "feishuTableName": item.feishu_table_name,
         "createdAt": _format_datetime(item.source_created_at),
         "updatedAt": _format_datetime(item.source_updated_at),
     }
@@ -73,7 +72,6 @@ class ResourceItemPayload(BaseModel):
     name: str = Field(..., min_length=1, max_length=512)
     netdiskType: str = Field("", max_length=64)
     url: str = Field(..., min_length=1)
-    feishuTableName: str = Field("", max_length=128)
     createdAt: str = ""
     updatedAt: str = ""
 
@@ -96,7 +94,6 @@ def list_resources(
             or_(
                 ResourceLibraryItemModel.name.like(pattern),
                 ResourceLibraryItemModel.url.like(pattern),
-                ResourceLibraryItemModel.feishu_table_name.like(pattern),
             )
         )
     if netdiskType.strip():
@@ -165,9 +162,8 @@ def create_resource(payload: ResourceItemPayload, db: Session = Depends(get_db))
         name=payload.name.strip(),
         netdisk_type=payload.netdiskType.strip(),
         url=payload.url.strip(),
-        feishu_table_name=payload.feishuTableName.strip(),
-        source_created_at=_parse_datetime(payload.createdAt),
-        source_updated_at=_parse_datetime(payload.updatedAt),
+        source_created_at=_parse_datetime(payload.createdAt) or datetime.now(),
+        source_updated_at=_parse_datetime(payload.updatedAt) or datetime.now(),
     )
     db.add(item)
     db.flush()
@@ -183,9 +179,8 @@ def update_resource(resource_id: int, payload: ResourceItemPayload, db: Session 
     item.name = payload.name.strip()
     item.netdisk_type = payload.netdiskType.strip()
     item.url = payload.url.strip()
-    item.feishu_table_name = payload.feishuTableName.strip()
-    item.source_created_at = _parse_datetime(payload.createdAt)
-    item.source_updated_at = _parse_datetime(payload.updatedAt)
+    item.source_created_at = _parse_datetime(payload.createdAt) or item.source_created_at
+    item.source_updated_at = _parse_datetime(payload.updatedAt) or datetime.now()
     db.flush()
     return {"success": True, "data": _serialize(item)}
 
@@ -273,7 +268,6 @@ async def import_resources(file: UploadFile = File(...), db: Session = Depends(g
             name=name,
             netdisk_type=_detect_netdisk_type(url),
             url=url,
-            feishu_table_name="主表",
             source_created_at=now_dt,
             source_updated_at=now_dt,
         )

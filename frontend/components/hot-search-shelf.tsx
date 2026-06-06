@@ -278,7 +278,10 @@ export default function HotSearchShelf() {
               </div>
               <button
                 type="button"
-                onClick={() => loadBoards(true)}
+                onClick={() => {
+                  loadBoards(true);
+                  setTimeout(() => window.location.reload(), 1500);
+                }}
                 disabled={loading}
                 className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-4 py-2 text-sm font-semibold text-white/80 transition-all hover:border-white/25 hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-60"
               >

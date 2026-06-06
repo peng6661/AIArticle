@@ -470,7 +470,6 @@ class ResourceLibraryItemModel(Base):
     name: Mapped[str] = mapped_column(String(512), nullable=False, index=True)
     netdisk_type: Mapped[str] = mapped_column(String(64), nullable=False, default="", index=True)
     url: Mapped[str] = mapped_column(Text, nullable=False)
-    feishu_table_name: Mapped[str] = mapped_column(String(128), nullable=False, default="")
     source_created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     source_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(

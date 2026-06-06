@@ -494,7 +494,6 @@ export interface ResourceItem {
   name: string;
   netdiskType: string;
   url: string;
-  feishuTableName: string;
   createdAt: string;
   updatedAt: string;
 }

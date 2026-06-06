@@ -10,7 +10,6 @@ const emptyForm: ResourceItemPayload = {
   name: "",
   netdiskType: "",
   url: "",
-  feishuTableName: "主表",
   createdAt: "",
   updatedAt: "",
 };
@@ -214,7 +213,6 @@ export default function ResourcesPage() {
       name: item.name,
       netdiskType: item.netdiskType,
       url: item.url,
-      feishuTableName: item.feishuTableName,
       createdAt: item.createdAt,
       updatedAt: item.updatedAt,
     });
@@ -417,7 +415,7 @@ export default function ResourcesPage() {
               value={keyword}
               onChange={(e) => setKeyword(e.target.value)}
               className="h-12 w-full rounded-xl border border-white/10 bg-white/5 pl-11 pr-4 text-sm text-white outline-none transition placeholder:text-white/30 focus:border-[#D94E28]/60 focus:bg-white/8"
-              placeholder="搜索名称、链接或飞书表名…"
+              placeholder="搜索名称或链接…"
             />
           </div>
 
@@ -515,7 +513,6 @@ export default function ResourcesPage() {
                   <th className="px-6 py-4 w-16">ID</th>
                   <th className="px-6 py-4">资料名称</th>
                   <th className="px-6 py-4 w-32">网盘类型</th>
-                  <th className="px-6 py-4 w-28">飞书表</th>
                   <th className="px-6 py-4 w-40">更新时间</th>
                   <th className="px-6 py-4 w-36 text-right">操作</th>
                 </tr>
@@ -578,10 +575,6 @@ export default function ResourcesPage() {
                       </span>
                     </td>
 
-                    <td className="px-6 py-4 text-white/55 whitespace-nowrap">
-                      {item.feishuTableName || "—"}
-                    </td>
-
                     <td className="px-6 py-4 text-white/45 text-xs whitespace-nowrap tabular-nums">
                       {item.updatedAt || item.createdAt || "—"}
                     </td>
@@ -626,7 +619,7 @@ export default function ResourcesPage() {
                 {/* 空状态 */}
                 {!loading && items.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="px-6 py-20 text-center">
+                    <td colSpan={6} className="px-6 py-20 text-center">
                       <div className="flex flex-col items-center gap-3 text-white/35">
                         <Database className="h-10 w-10 opacity-30" />
                         <span className="text-sm">暂无资料，点击右上角「新增资料」开始添加</span>
@@ -786,11 +779,6 @@ export default function ResourcesPage() {
                 value={form.updatedAt}
                 onChange={(v) => setForm({ ...form, updatedAt: v })}
                 placeholder="YYYY-MM-DD HH:mm:ss"
-              />
-              <Field
-                label="飞书表名"
-                value={form.feishuTableName}
-                onChange={(v) => setForm({ ...form, feishuTableName: v })}
               />
               <Field
                 label="网盘链接"
