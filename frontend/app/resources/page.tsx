@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
-import { ArrowUp, Copy, Database, Download, Edit3, ExternalLink, Plus, RefreshCw, Search, Trash2, Upload, X } from "lucide-react";
+import { ArrowDownUp, ArrowUp, ArrowUpDown, Copy, Database, Download, Edit3, ExternalLink, Plus, RefreshCw, Search, Trash2, Upload, X } from "lucide-react";
 import Navbar from "@/components/navbar";
 import VideoBackground from "@/components/video-background";
 import { ResourceItem, ResourceItemPayload, ResourceNetdiskType, taskApi } from "@/lib/tasks-api";
@@ -37,6 +37,10 @@ export default function ResourcesPage() {
   // 提交时快照，避免边输边请求
   const [submittedKeyword, setSubmittedKeyword] = useState("");
   const [submittedNetdiskType, setSubmittedNetdiskType] = useState("");
+
+  // ── 排序状态 ──────────────────────────────────────────────
+  const [sortBy, setSortBy] = useState<"id" | "updatedAt" | "createdAt">("updatedAt");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
 
   // ── 表单 & modal ──────────────────────────────────────────
   const [saving, setSaving] = useState(false);
@@ -95,7 +99,7 @@ export default function ResourcesPage() {
   }, []);
 
   // ── 首屏 / 搜索重置加载（第1页）─────────────────────────
-  const loadFirstPage = useCallback(async (kw: string, ndt: string, ps: number) => {
+  const loadFirstPage = useCallback(async (kw: string, ndt: string, ps: number, sb: string, so: string) => {
     setLoading(true);
     setError("");
     setItems([]);
@@ -103,7 +107,7 @@ export default function ResourcesPage() {
     setPage(1);
     setHasMore(true);
     try {
-      const res = await taskApi.listResourceItems({ keyword: kw, netdiskType: ndt, page: 1, pageSize: ps });
+      const res = await taskApi.listResourceItems({ keyword: kw, netdiskType: ndt, page: 1, pageSize: ps, sortBy: sb, sortOrder: so });
       setItems(res.data);
       setTotal(res.pagination.total);
       setHasMore(res.data.length === ps && res.pagination.total > ps);
@@ -115,11 +119,11 @@ export default function ResourcesPage() {
   }, []);
 
   // ── 追加加载（第2页起）────────────────────────────────────
-  const loadNextPage = useCallback(async (nextPage: number, kw: string, ndt: string, ps: number) => {
+  const loadNextPage = useCallback(async (nextPage: number, kw: string, ndt: string, ps: number, sb: string, so: string) => {
     if (loadingMore) return;
     setLoadingMore(true);
     try {
-      const res = await taskApi.listResourceItems({ keyword: kw, netdiskType: ndt, page: nextPage, pageSize: ps });
+      const res = await taskApi.listResourceItems({ keyword: kw, netdiskType: ndt, page: nextPage, pageSize: ps, sortBy: sb, sortOrder: so });
       setItems((prev) => [...prev, ...res.data]);
       setPage(nextPage);
       setHasMore(res.data.length === ps && res.pagination.total > nextPage * ps);
@@ -132,7 +136,7 @@ export default function ResourcesPage() {
 
   // ── 初始加载 ──────────────────────────────────────────────
   useEffect(() => {
-    loadFirstPage("", "", pageSize);
+    loadFirstPage("", "", pageSize, sortBy, sortOrder);
   }, []);// eslint-disable-line react-hooks/exhaustive-deps
 
   // ── IntersectionObserver：到底部自动加载 ─────────────────
@@ -142,7 +146,7 @@ export default function ResourcesPage() {
     observerRef.current = new IntersectionObserver(
       (entries) => {
         if (entries[0].isIntersecting && hasMore && !loading && !loadingMore) {
-          loadNextPage(page + 1, submittedKeyword, submittedNetdiskType, pageSize);
+          loadNextPage(page + 1, submittedKeyword, submittedNetdiskType, pageSize, sortBy, sortOrder);
         }
       },
       { rootMargin: "200px" }
@@ -151,19 +155,19 @@ export default function ResourcesPage() {
     if (sentinelRef.current) observerRef.current.observe(sentinelRef.current);
 
     return () => observerRef.current?.disconnect();
-  }, [hasMore, loading, loadingMore, page, submittedKeyword, submittedNetdiskType, loadNextPage, pageSize]);
+  }, [hasMore, loading, loadingMore, page, submittedKeyword, submittedNetdiskType, sortBy, sortOrder, loadNextPage, pageSize]);
 
   // ── 提交搜索 ──────────────────────────────────────────────
   const submitSearch = (event: FormEvent) => {
     event.preventDefault();
     setSubmittedKeyword(keyword);
     setSubmittedNetdiskType(netdiskType);
-    loadFirstPage(keyword, netdiskType, pageSize);
+    loadFirstPage(keyword, netdiskType, pageSize, sortBy, sortOrder);
   };
 
   // ── 刷新 ──────────────────────────────────────────────────
   const handleRefresh = () => {
-    loadFirstPage(submittedKeyword, submittedNetdiskType, pageSize);
+    loadFirstPage(submittedKeyword, submittedNetdiskType, pageSize, sortBy, sortOrder);
     taskApi.listResourceNetdiskTypes().then((res) => {
       if (res.success) setTypes(res.data);
     }).catch(() => {});
@@ -231,7 +235,7 @@ export default function ResourcesPage() {
         await taskApi.createResourceItem(form);
       }
       setModalOpen(false);
-      loadFirstPage(submittedKeyword, submittedNetdiskType, pageSize);
+      loadFirstPage(submittedKeyword, submittedNetdiskType, pageSize, sortBy, sortOrder);
       taskApi.listResourceNetdiskTypes().then((res) => { if (res.success) setTypes(res.data); }).catch(() => {});
     } catch (err: any) {
       setError(err.response?.data?.detail || "保存失败");
@@ -244,7 +248,7 @@ export default function ResourcesPage() {
     if (!confirm(`确定删除「${item.name}」吗？`)) return;
     try {
       await taskApi.deleteResourceItem(item.id);
-      loadFirstPage(submittedKeyword, submittedNetdiskType, pageSize);
+      loadFirstPage(submittedKeyword, submittedNetdiskType, pageSize, sortBy, sortOrder);
       taskApi.listResourceNetdiskTypes().then((res) => { if (res.success) setTypes(res.data); }).catch(() => {});
     } catch (err: any) {
       setError(err.response?.data?.detail || "删除失败");
@@ -269,7 +273,7 @@ export default function ResourcesPage() {
     try {
       const res = await taskApi.importResources(file);
       setImportResult(res.data);
-      loadFirstPage(submittedKeyword, submittedNetdiskType, pageSize);
+      loadFirstPage(submittedKeyword, submittedNetdiskType, pageSize, sortBy, sortOrder);
       taskApi.listResourceNetdiskTypes().then((r) => { if (r.success) setTypes(r.data); }).catch(() => {});
     } catch (err: any) {
       setError(err.response?.data?.detail || "导入失败");
@@ -318,7 +322,7 @@ export default function ResourcesPage() {
     }
     setPageSize(clamped);
     setPageSizeInput(String(clamped));
-    loadFirstPage(submittedKeyword, submittedNetdiskType, clamped);
+    loadFirstPage(submittedKeyword, submittedNetdiskType, clamped, sortBy, sortOrder);
   };
   const handlePageSizeKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") handlePageSizeBlur();
@@ -448,6 +452,35 @@ export default function ResourcesPage() {
               className="h-12 w-full rounded-xl border border-white/10 bg-[#111]/80 pl-4 pr-3 text-sm text-white outline-none transition placeholder:text-white/30 focus:border-[#D94E28]/60"
               placeholder="条/页"
             />
+          </div>
+
+          {/* 排序控件 */}
+          <div className="flex items-center gap-1">
+            <select
+              value={sortBy}
+              onChange={(e) => {
+                const newSortBy = e.target.value as "id" | "updatedAt" | "createdAt";
+                setSortBy(newSortBy);
+                loadFirstPage(submittedKeyword, submittedNetdiskType, pageSize, newSortBy, sortOrder);
+              }}
+              className="h-12 min-w-[110px] rounded-xl border border-white/10 bg-[#111]/80 px-4 text-sm text-white outline-none transition focus:border-[#D94E28]/60"
+            >
+              <option value="updatedAt">更新时间</option>
+              <option value="createdAt">创建时间</option>
+              <option value="id">ID</option>
+            </select>
+            <button
+              type="button"
+              onClick={() => {
+                const newOrder = sortOrder === "desc" ? "asc" : "desc";
+                setSortOrder(newOrder);
+                loadFirstPage(submittedKeyword, submittedNetdiskType, pageSize, sortBy, newOrder);
+              }}
+              className="inline-flex h-12 w-12 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-white/60 transition hover:border-[#D94E28]/40 hover:bg-[#D94E28]/10 hover:text-[#FF8A65] active:scale-95"
+              title={sortOrder === "desc" ? "当前：降序 → 切换升序" : "当前：升序 → 切换降序"}
+            >
+              {sortOrder === "desc" ? <ArrowDownUp className="h-4 w-4" /> : <ArrowUpDown className="h-4 w-4" />}
+            </button>
           </div>
 
           {/* 查询按钮 */}

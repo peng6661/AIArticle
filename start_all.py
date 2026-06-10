@@ -32,7 +32,7 @@ _procs = {}  # name -> subprocess.Popen
 _log_files = {}
 
 BACKEND_PORT = 8000
-FRONTEND_PORT = 3000
+FRONTEND_PORT = 3001
 OPEN_URL = f"http://localhost:{FRONTEND_PORT}"
 
 

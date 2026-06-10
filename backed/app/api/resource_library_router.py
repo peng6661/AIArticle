@@ -82,6 +82,8 @@ def list_resources(
     netdiskType: str = Query("", max_length=64),
     page: int = Query(1, ge=1),
     pageSize: int = Query(20, ge=1, le=100),
+    sortBy: str = Query("updatedAt", pattern=r"^(id|updatedAt|createdAt)$"),
+    sortOrder: str = Query("desc", pattern=r"^(asc|desc)$"),
     db: Session = Depends(get_db),
 ):
     stmt = select(ResourceLibraryItemModel)
@@ -104,9 +106,19 @@ def list_resources(
         count_stmt = count_stmt.where(condition)
 
     total = db.scalar(count_stmt) or 0
+
+    # ── 排序映射 ──
+    sort_column_map = {
+        "id": ResourceLibraryItemModel.id,
+        "updatedAt": ResourceLibraryItemModel.source_updated_at,
+        "createdAt": ResourceLibraryItemModel.source_created_at,
+    }
+    sort_col = sort_column_map.get(sortBy, ResourceLibraryItemModel.source_updated_at)
+    sort_expr = sort_col.desc() if sortOrder == "desc" else sort_col.asc()
+
     items = db.scalars(
         stmt.order_by(
-            ResourceLibraryItemModel.source_updated_at.desc(),
+            sort_expr,
             ResourceLibraryItemModel.id.desc(),
         )
         .offset((page - 1) * pageSize)

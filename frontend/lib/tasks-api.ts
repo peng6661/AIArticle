@@ -381,7 +381,7 @@ export const taskApi = {
   },
 
   listResourceItems: async (
-    params: { keyword?: string; netdiskType?: string; page?: number; pageSize?: number } = {}
+    params: { keyword?: string; netdiskType?: string; page?: number; pageSize?: number; sortBy?: string; sortOrder?: string } = {}
   ): Promise<ResourceListResponse> => {
     const { data } = await apiClient.get("/api/resource-library", { params });
     return data;
