@@ -1,7 +1,9 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
-import { ArrowDownUp, ArrowUp, ArrowUpDown, Copy, Database, Download, Edit3, ExternalLink, Plus, RefreshCw, Search, Trash2, Upload, X } from "lucide-react";
+import { ArrowDownUp, ArrowUp, ArrowUpDown, Calendar, Copy, Database, Download, Edit3, ExternalLink, Plus, RefreshCw, Search, Trash2, Upload, X } from "lucide-react";
+import DatePicker from "react-datepicker";
+import "react-datepicker/dist/react-datepicker.css";
 import Navbar from "@/components/navbar";
 import VideoBackground from "@/components/video-background";
 import { ResourceItem, ResourceItemPayload, ResourceNetdiskType, taskApi } from "@/lib/tasks-api";
@@ -48,6 +50,9 @@ export default function ResourcesPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState<ResourceItemPayload>(emptyForm);
+  // 时间选择器用 Date | null，独立于 form 的字符串
+  const [createdDate, setCreatedDate] = useState<Date | null>(null);
+  const [updatedDate, setUpdatedDate] = useState<Date | null>(null);
 
   // ── 滚动回顶按钮 ──────────────────────────────────────────
   const [showScrollTop, setShowScrollTop] = useState(false);
@@ -208,6 +213,8 @@ export default function ResourcesPage() {
   const openCreate = () => {
     setEditingId(null);
     setForm(emptyForm);
+    setCreatedDate(null);
+    setUpdatedDate(null);
     setModalOpen(true);
   };
 
@@ -220,7 +227,16 @@ export default function ResourcesPage() {
       createdAt: item.createdAt,
       updatedAt: item.updatedAt,
     });
+    setCreatedDate(item.createdAt ? new Date(item.createdAt) : null);
+    setUpdatedDate(item.updatedAt ? new Date(item.updatedAt) : null);
     setModalOpen(true);
+  };
+
+  /** 将 Date 对象格式化为后端接受的 YYYY-MM-DD HH:mm:ss */
+  const fmtDate = (d: Date | null): string => {
+    if (!d) return "";
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
   };
 
   const saveItem = async (event: FormEvent) => {
@@ -229,10 +245,16 @@ export default function ResourcesPage() {
     setSaving(true);
     setError("");
     try {
+      // 空值则让后端默认当前时间
+      const payload = {
+        ...form,
+        createdAt: fmtDate(createdDate),
+        updatedAt: fmtDate(updatedDate),
+      };
       if (editingId) {
-        await taskApi.updateResourceItem(editingId, form);
+        await taskApi.updateResourceItem(editingId, payload);
       } else {
-        await taskApi.createResourceItem(form);
+        await taskApi.createResourceItem(payload);
       }
       setModalOpen(false);
       loadFirstPage(submittedKeyword, submittedNetdiskType, pageSize, sortBy, sortOrder);
@@ -801,17 +823,17 @@ export default function ResourcesPage() {
                 onChange={(v) => setForm({ ...form, netdiskType: v })}
                 types={types}
               />
-              <Field
+              <DateTimeField
                 label="创建时间"
-                value={form.createdAt}
-                onChange={(v) => setForm({ ...form, createdAt: v })}
-                placeholder="YYYY-MM-DD HH:mm:ss"
+                value={createdDate}
+                onChange={setCreatedDate}
+                placeholder="不填则默认当前时间"
               />
-              <Field
+              <DateTimeField
                 label="更新时间"
-                value={form.updatedAt}
-                onChange={(v) => setForm({ ...form, updatedAt: v })}
-                placeholder="YYYY-MM-DD HH:mm:ss"
+                value={updatedDate}
+                onChange={setUpdatedDate}
+                placeholder="不填则默认当前时间"
               />
               <Field
                 label="网盘链接"
@@ -945,5 +967,76 @@ function Field(props: {
         />
       )}
     </label>
+  );
+}
+
+// ── 日期时间选择弹窗组件 ─────────────────────────────
+function DateTimeField(props: {
+  label: string;
+  value: Date | null;
+  onChange: (date: Date | null) => void;
+  placeholder?: string;
+}) {
+  const [open, setOpen] = useState(false);
+
+  const fmtDisplay = (d: Date | null): string => {
+    if (!d) return "";
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
+
+  return (
+    <div className="relative">
+      <span className="mb-1.5 block text-xs font-bold text-white/40">{props.label}</span>
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={() => setOpen(!open)}
+          className="h-11 flex-1 rounded-xl border border-white/10 bg-white/5 px-4 text-left text-sm transition hover:border-white/20 focus:border-[#D94E28]/60 focus:bg-white/8"
+        >
+          {props.value ? (
+            <span className="text-white">{fmtDisplay(props.value)}</span>
+          ) : (
+            <span className="text-white/20">{props.placeholder || "选择时间"}</span>
+          )}
+        </button>
+        {props.value && (
+          <button
+            type="button"
+            onClick={() => { props.onChange(null); setOpen(false); }}
+            className="h-11 w-11 flex items-center justify-center rounded-xl border border-white/10 bg-white/5 text-white/40 transition hover:bg-white/10 hover:text-white/70"
+            title="清除时间"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        )}
+      </div>
+      {open && (
+        <div className="absolute z-[100] mt-2 rounded-xl border border-white/10 bg-[#1a1a1a] p-3 shadow-2xl">
+          <DatePicker
+            selected={props.value}
+            onChange={(date) => {
+              props.onChange(date);
+            }}
+            showTimeSelect
+            timeFormat="HH:mm"
+            timeIntervals={5}
+            dateFormat="yyyy-MM-dd HH:mm"
+            inline
+            calendarClassName="dark-datepicker"
+            timeClassName={() => "dark-time-slot"}
+          />
+          <div className="mt-2 flex justify-end">
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              className="rounded-lg bg-[#D94E28] px-4 py-1.5 text-xs font-bold text-white transition hover:bg-[#c44322]"
+            >
+              确认
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
